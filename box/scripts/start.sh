@@ -1,38 +1,15 @@
 #!/system/bin/sh
+clear; cd ${0%/*}
 
-module_dir="/data/adb/modules/box4"
-
-[ -n "$(magisk -v | grep lite)" ] && module_dir=/data/adb/lite_modules/box4
-
-scripts=$(realpath $0)
-scripts_dir=$(dirname ${scripts})
-
-source ${scripts_dir}/box.config
-
-wait_until_login(){
-  # we doesn't have the permission to rw "/sdcard" before the user unlocks the screen
-  local test_file="/sdcard/Android/.BOX4TEST"
-  true > "$test_file"
-  while [ ! -f "$test_file" ] ; do
-    true > "$test_file"
-    sleep 1
-  done
-  rm "$test_file"
-
-  while [ ! -f "/data/system/packages.xml" ] ; do
-    sleep 1
-  done
-}
-
-wait_until_login
-
-rm ${pid_file}
-mkdir -p ${run_path}
-
-if [ ! -f ${box_path}/manual ] && [ ! -f ${module_dir}/disable ] ; then
-  mv ${run_path}/run.log ${run_path}/run.log.bak
-  mv ${run_path}/run_error.log ${run_path}/run_error.log.bak
-
-  ${scripts_dir}/box.service start >> ${run_path}/run.log 2>> ${run_path}/run_error.log && \
-  ${scripts_dir}/box.tproxy enable >> ${run_path}/run.log 2>> ${run_path}/run_error.log
-fi
+  MODDIR="/data/adb/modules/box-module"
+  SCRIPTS_DIR="/data/adb/box/scripts"
+  busybox="/data/adb/magisk/busybox"
+  normal=$(printf '\033[0m'); green=$(printf '\033[0;32m'); red=$(printf '\033[91m')
+  
+  source ./box.scripts
+  
+  [ ! -f ${MODDIR}/disable ] && run
+  
+  pgrep inotifyd > /dev/null 2>&1 && pkill -g 23332
+  
+  ${busybox} setuidgid 0:23332 inotifyd "${SCRIPTS_DIR}/box.inotify" "${MODDIR}" > /dev/null 2>&1 &

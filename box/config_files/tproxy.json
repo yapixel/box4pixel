@@ -1,0 +1,704 @@
+{
+  "log": {
+    "disabled": false,
+    "level": "error",
+    "output": "sing-box.log",
+    "timestamp": true
+  },
+  
+  "dns": {
+        "servers": [
+         {
+           "tag": "google",
+           "address": "tls://8.8.8.8"
+         },
+         {
+          "tag": "local",
+          "address": "udp://223.5.5.5",
+          "detour": "direct"
+         }
+      ],
+    "rules": [
+      {
+        "outbound": "any",
+        "server": "local"
+      },
+      {
+        "clash_mode": "Direct",
+        "server": "local"
+      },
+      {
+        "clash_mode": "Global",
+        "server": "google"
+      },
+      {
+        "rule_set": "geosite-geolocation-cn",
+        "server": "local"
+      },
+      {
+        "rule_set": "geoip-cn",
+        "server": "google"
+      }
+    ],
+    "independent_cache": false,
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+       "type": "tproxy",
+            "tag": "tproxy-in",
+            "listen": "::",
+            "listen_port": 1536,
+            "sniff": true,
+            "sniff_override_destination": false
+  }
+  ],
+
+ "outbound_providers": [
+         {
+           "tag": "DlerCloud",
+           "url": "https://dler.cloud/subscribe/sc4BOHhmuiv2Kn70xUt6?mu=ss&type=love",
+           "update_interval": "12h", 
+           "cache_tag": "dler",
+           "request_timeout": "60s",
+           "http3": false,
+           "headers": {
+           "User-Agent" : "clash.meta"
+            }, 
+           "detour": "direct",
+           "actions": [
+              {
+                 "type": "tagformat",
+                 "rules": [".*"],
+                 "logical": "or", 
+                 "invert": false, 
+                 "format": "Dler - %s"
+              }
+           ]
+         },
+          {
+           "tag": "Nexitally",
+           "url": "https://llspns.xyz/?L2Rvd25sb2FkQ29uZmlnL0NsYXNoLmFzcHg/ZXE9YW5kcm9pZCZ1cms9YTBmZDFkYzgtMTcxOC00ZjIxLWI4NDEtMzk2ZmExMzI3YmVmJm1tPTIzMDcwNiZjOGZjNDI1NjgxZTg0OGEzYTdmY2RkNmZh",
+           "update_interval": "24h", 
+           "cache_tag": "air",
+           "request_timeout": "60s",
+           "http3": false,
+           "headers": {
+           "User-Agent" : "clash.meta"
+            }, 
+           "detour": "direct",
+           "actions": [
+              {
+                "type": "filter",
+                 "rules": [
+                   "GB",
+                   "Traffic Reset",
+                   "Expire Date",
+                   "\\[Premium\\]"
+                 ],
+                 "logical": "or", 
+                 "invert": false
+              },
+              {
+                 "type": "tagformat",
+                 "rules": [".*"],
+                 "logical": "or", 
+                 "invert": false, 
+                 "format": "Air - %s"
+              }
+           ]
+      },
+      {
+           "tag": "Tag",
+           "url": "https://dy.tagsub.net/api/v1/client/subscribe?token=ae0e58a5cece62bd6e41dd0294ed780f",
+           "update_interval": "6h", 
+           "cache_tag": "tag",
+           "request_timeout": "60s",
+           "http3": false,
+           "headers": {
+           "User-Agent" : "clash.meta"
+            },
+           "detour": "direct",
+           "actions": [
+              {
+               "type": "setdialer",
+               "rules": [
+                  ".*"
+                ], 
+               "dialer": {
+               "set_tcp_fast_open": false
+                }
+              },
+              {
+                "type": "tagformat",
+                "rules": [".*"],
+                "logical": "or", 
+                "invert": false, 
+                "format": "Tag - %s"
+              }
+            ]
+      },
+      
+      {
+           "tag": "Ruaue",
+           "url": "https://gist.githubusercontent.com/debiansid/53195eabc0d1be57309f6bd6d0ab3d63/raw/c246356973d88d0a0b49b3d4a329e849a50cfd7c/rnetx.json",
+           "update_interval": "1h", 
+           "cache_tag": "ruaul",
+           "request_timeout": "60s",
+           "http3": false,
+           "headers": {
+           "User-Agent" : "clash.meta"
+            }, 
+           "optimize": true,
+           "detour": "Hong Kong"
+      }
+   ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    },
+    {
+      "type": "dns",
+      "tag": "dns-out"
+    },
+    {
+      "type": "selector",
+      "tag": "Proxy",
+      "providers": [ 
+        {
+          "tag": "Ruaue", 
+          "rules": ["HK|AZ|JP|SG|US"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "DlerCloud", 
+          "rules": ["香港|台湾|新加坡|日本"],
+          "logical": "or", 
+          "invert": false 
+        }
+       ]
+      },
+    {
+      "type": "selector",
+      "tag": "Netflix",
+      "outbounds": [
+          "Hong Kong",
+          "Singapore",
+          "Japan",
+          "US"
+      ]
+    },
+    {
+      "type": "selector",
+      "tag": "Telegram",
+      "providers": [ 
+        {
+          "tag": "Ruaue", 
+          "rules": ["HK|SG"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "DlerCloud", 
+          "rules": ["新加坡"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Nexitally", 
+          "rules": ["Singapore"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Tag", 
+          "rules": ["新加坡"],
+          "logical": "or", 
+          "invert": false 
+        }
+       ]
+    },
+    {
+      "type": "selector",
+      "tag": "Hulu",
+      "outbounds": [ 
+        "US"
+      ]
+    },
+    {
+      "type": "selector",
+      "tag": "Youtube",
+      "outbounds": [
+        "Hong Kong",
+        "Singapore",
+        "Japan",
+        "US"
+      ],
+      "providers": [ 
+        {
+          "tag": "Ruaue", 
+          "rules": ["HK|SG|US"],
+          "logical": "or", 
+          "invert": false 
+        }
+        ],
+      "interrupt_exist_connections": false
+    },
+    {
+      "type": "selector",
+      "tag": "Openai",
+      "outbounds": [
+        "Singapore",
+        "Japan",
+        "US"
+      ]
+    },
+    {
+      "type": "selector",
+      "tag": "Tiktok",
+      "outbounds": [
+        "Singapore",
+        "Japan",
+        "US"
+      ]
+    },
+    {
+      "type": "selector",
+      "tag": "Google",
+      "outbounds": [
+        "US"
+      ]
+      
+    },
+    {
+      "tag": "Hong Kong",
+      "type": "selector", 
+      "providers": [ 
+        {
+          "tag": "Nexitally", 
+          "rules": ["Hong Kong"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "DlerCloud", 
+          "rules": ["香港"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Tag", 
+          "rules": ["香港"],
+          "logical": "or", 
+          "invert": false 
+        }
+      ]
+    },
+    {
+      "tag": "Japan",
+      "type": "selector", 
+      "providers": [ 
+        {
+          "tag": "Ruaue", 
+          "rules": ["JP"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Nexitally", 
+          "rules": ["Japan"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "DlerCloud", 
+          "rules": ["日本"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Tag", 
+          "rules": ["日本"],
+          "logical": "or", 
+          "invert": false 
+        }
+      ]
+    },
+    {
+      "tag": "US",
+      "type": "selector", 
+      "providers": [ 
+        
+        {
+          "tag": "Tag", 
+          "rules": ["美国"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "DlerCloud", 
+          "rules": ["美国"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Nexitally", 
+          "rules": ["USA"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Ruaue", 
+          "rules": ["US"],
+          "logical": "or", 
+          "invert": false 
+        }
+      ]
+    },
+    {
+      "tag": "Singapore",
+      "type": "selector", 
+      "providers": [ 
+        {
+          "tag": "DlerCloud", 
+          "rules": ["新加坡"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Nexitally", 
+          "rules": ["Singapore"],
+          "logical": "or", 
+          "invert": false 
+        },
+        {
+          "tag": "Tag", 
+          "rules": ["新加坡"],
+          "logical": "or", 
+          "invert": false 
+        }
+      ]
+    }
+  ],
+  "route": {
+     "rule_set": [
+      {
+        "type": "remote",
+        "tag": "category-ads-all",
+        "format": "binary",
+        "path": "../rule_set/geosite-category-ads-all.srs",
+        "url": "https://raw.githubusercontent.com/ruaue/v2ray-rules-dat/release/singbox_rule_set/geosite-category-ads-all.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "apple@cn",
+        "format": "binary",
+        "path": "../rule_set/geosite-apple@cn.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple@cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "category-games@cn",
+        "format": "binary",
+        "path": "../rule_set/geosite-category-games@cn.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-games@cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "private",
+        "format": "binary",
+        "path": "../rule_set/geosite-private.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-google-cn",
+        "format": "binary",
+        "path": "../rule_set/geosite-google-cn.srs",
+        "url": "https://raw.github.com/ruaue/v2ray-rules-dat/release/singbox_rule_set/geosite-google-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-cn",
+        "format": "binary",
+        "path": "../rule_set/geosite-cn.srs",
+        "url": "https://raw.github.com/ruaue/v2ray-rules-dat/release/singbox_rule_set/geosite-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-geolocation-cn",
+        "format": "binary",
+        "path": "../rule_set/geosite-geolocation-cn.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-geolocation-!cn",
+        "format": "binary",
+        "path": "../rule_set/geosite-geolocation-!cn.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geoip-cn",
+        "format": "binary",
+        "path": "../rule_set/geoip-cn.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-netflix",
+        "format": "binary",
+        "path": "../rule_set/geosite-netflix.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-tiktok",
+        "format": "binary",
+        "path": "../rule_set/geosite-tiktok.srs",
+        "url": "https://github.com/DustinWin/ruleset_geodata/raw/sing-box-ruleset/tiktok.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-openai",
+        "format": "binary",
+        "path": "../rule_set/geosite-openai.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geoip-telegram",
+        "format": "binary",
+        "path": "../rule_set/geoip-telegram.srs",
+        "url": "https://github.com/ruaue/v2ray-rules-dat/raw/release/singbox_ip_rule_set/geoip-telegram.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-adblockplus",
+        "format": "binary",
+        "path": "../rule_set/geosite-adblockplus.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-adblockplus.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-youtube",
+        "format": "binary",
+        "path": "../rule_set/geosite-youtube.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-hulu",
+        "format": "binary",
+        "path": "../rule_set/geosite-hulu.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-hulu.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geoip-google",
+        "format": "binary",
+        "path": "../rule_set/geoip-google.srs",
+        "url": "https://github.com/ruaue/v2ray-rules-dat/raw/release/singbox_ip_rule_set/geoip-google.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-google",
+        "format": "binary",
+        "path": "../rule_set/geosite-google.srs",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h"
+      }
+    ],
+    "rules": [
+      {
+        "type": "logical",
+        "mode": "or",
+        "rules":[
+          {
+            "port":53
+          },
+          {
+            "protocol": "dns"
+          }
+        ],
+        "outbound": "dns-out"
+      },
+      {
+        "clash_mode": "Global",
+        "outbound": "Proxy"
+      },
+      {
+        "clash_mode": "Direct",
+        "outbound": "direct"
+      },
+      {
+        "type": "logical",
+        "mode": "or",
+        "rules":[
+          {
+         "ip_cidr": [
+          "223.86.122.185/32",
+          "125.64.109.200/32"
+           ],
+         "domain_suffix": [
+           ".byteimg.com",
+           ".bytedance.com",
+             ".bytedanceapi.com",
+           ".snssdk.com",
+           ".zijieapi.com",
+           ".douyin.com"
+           ],
+         "domain": [
+           "frontier100-toutiao-hl.fqnovel.com"
+           ]
+           }
+          ],
+         "outbound": "block"
+      },
+      {
+        "rule_set": [
+           "category-ads-all"
+         ],
+        "outbound": "block"
+      },
+      {
+         "rule_set": "geosite-youtube",
+         "outbound": "Youtube"
+      },
+      {
+         "rule_set": "geosite-tiktok",
+         "outbound": "Tiktok"
+      },
+      {
+         "rule_set": [
+         "geosite-google",
+         "geoip-google",
+         "geosite-google-cn"
+         ],
+         "outbound": "Google"
+      },
+      {
+       "domain": [
+          "dl.google.com",
+          "www.gstatic.com",
+          "cdn.usefathom.com"
+        ],
+       "domain_suffix": [
+          "googleapis.com",
+          "anthropic.com",
+          "claude.ai"
+        ],
+        "outbound": "Google"
+      },
+      {
+        "rule_set": [
+          "apple@cn",
+          "category-games@cn",
+          "private",
+          "geosite-cn"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "rule_set": "geoip-cn",
+        "outbound": "direct"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      },
+      {
+         "rule_set": "geosite-netflix",
+         "outbound": "Netflix"
+      },
+      {
+         "rule_set": "geosite-openai",
+         "outbound": "Openai"
+      },
+      {
+         "rule_set": "geoip-telegram",
+         "outbound": "Telegram"
+      },
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          {
+            "rule_set": "geosite-geolocation-!cn",
+            "invert": true
+          },
+          {
+            "rule_set": [
+              "geoip-cn",
+              "geosite-cn"
+            ]
+          }
+        ],
+        "outbound": "direct"
+      }
+    ],
+    "auto_detect_interface": true,
+    "find_process": true,
+    "final": "Proxy"
+  },
+    "experimental": {
+       "cache_file": {
+          "enabled": true,
+          "path": "cache.db" ,
+          "cache_id": "sfa-1.8",
+          "store_fakeip": false
+        },
+       "clash_api": {
+          "default_mode": "Rule",
+          "external_controller": "127.0.0.1:9090",
+          "external_ui": "yacd-gh-pages",
+          "external_ui_download_url": "https://github.com/CHIZI-0618/yacd/archive/gh-pages.zip",
+          "external_ui_download_detour": "Proxy"
+    }
+  }
+}
+}
+
+

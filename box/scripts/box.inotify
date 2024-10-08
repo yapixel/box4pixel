@@ -1,31 +1,37 @@
 #!/system/bin/sh
+clear; cd ${0%/*}
 
-scripts=$(realpath $0)
-scripts_dir=$(dirname ${scripts})
+source ./box.scripts
 
-source ${scripts_dir}/box.config
+config_name="${sourcefile##*/}"
+${binfile} version | grep provider && provider="ᵖʳᵒᵛⁱᵈᵉʳ"
+prop_file="/data/adb/modules/box-module/module.prop"
 
-service_path="${scripts_dir}/box.service"
-tproxy_path="${scripts_dir}/box.tproxy"
+add_txt="$(${binfile} version | head -1 | cut -d ' ' -f3)${provider}"
+current_time=$(date "+%Y.%m.%d %H:%M")
 
 events=$1
-monitor_dir=$2
 monitor_file=$3
 
-service_control() {
-  if [ ! -f ${box_path}/manual ] ; then
-    if [ "${monitor_file}" = "disable" ] ; then
-      if [ "${events}" = "d" ] ; then
-        ${service_path} start >> ${run_path}/run.log 2>> ${run_path}/run_error.log
-        ${tproxy_path} enable >> ${run_path}/run.log 2>> ${run_path}/run_error.log
-      elif [ "${events}" = "n" ] ; then
-        ${tproxy_path} disable >> ${run_path}/run.log 2>> ${run_path}/run_error.log
-        ${service_path} stop >> ${run_path}/run.log 2>> ${run_path}/run_error.log
-      fi
-    fi
-  fi
-}
+if [ "${monitor_file}" = "disable" ]; then #1
+  if [ "${events}" = "d" ]; then #2
+    if [ -n "$(net_id)" ]; then #2-1
+       sed -i "/description/c\description=🟢 proxy mode: ${mode} | bin: $add_txt | start time: $current_time | ssid: $(net_id) | ip: $(net_ip) | config: $config_name 🟢" ${prop_file}
+    else #2-1
+       sed -i "/description/c\description=🟢 proxy mode: ${mode} | bin: $add_txt | start time: $current_time | ssid: $(net_id) | ip: $(net_ip) | config: $config_name 🟢" ${prop_file}
+    fi #2-1
+    run  >/dev/null 2>&1
+  elif [ "${events}" = "n" ]; then #2
+    if [ -n "$(net_id)" ]; then #2-2
+       sed -i "/description/c\description=🔴proxy mode: ${mode} | bin: $add_txt | stop time: $current_time | ssid: $(net_id) | ip: $(net_ip) | config: $config_name 🔴" ${prop_file}
+    else #2-2
+       sed -i "/description/c\description=🔴proxy mode: ${mode} | bin: $add_txt | stop time: $current_time | ssid: $(net_id) | ip: $(net_ip) | config: $config_name 🔴" ${prop_file}
+    fi #2-2
+    stop  >/dev/null 2>&1 # stop
+  fi #2
+fi #1
 
-mkdir -p ${run_path}
 
-service_control
+
+
+
