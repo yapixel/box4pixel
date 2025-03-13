@@ -1,7 +1,7 @@
-id=box4-module
-name=Box4Magisk
-version=v4.27
-versionCode=202410081122
-author=CHIZI-0618
-description=Use sing-box, clash, v2ray, xray tunnel proxy on Android devices.
-updateJson=https://raw.githubusercontent.com/debiansid/box4magisk/main/box4.json
+id=box4-pixel
+name=Box4Pixel
+version=v0.01
+versionCode=2025103151111
+author=debiansid
+description=Use sing-box on Google Pixel devices.
+updateJson=https://raw.githubusercontent.com/debiansid/box4pixel/main/box4.json
