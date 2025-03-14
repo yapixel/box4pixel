@@ -5,7 +5,7 @@ source ./box.scripts
 
 config_name="${sourcefile##*/}"
 ${binfile} version | grep provider && provider="ᵖʳᵒᵛⁱᵈᵉʳ"
-prop_file="/data/adb/modules/box-module/module.prop"
+prop_file="/data/adb/modules/box4-pixel/module.prop"
 
 add_txt="$(${binfile} version | head -1 | cut -d ' ' -f3)${provider}"
 current_time=$(date "+%Y.%m.%d %H:%M")
