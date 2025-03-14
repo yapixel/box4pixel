@@ -1,7 +1,7 @@
 id=box4-pixel
 name=Box4Pixel
 version=v0.1
-versionCode=20250315
+versionCode=001
 author=zen
 description=Use sing-box on Google Pixel devices.
 updateJson=https://raw.githubusercontent.com/debiansid/box4pixel/main/box4.json
