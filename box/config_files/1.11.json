@@ -1,0 +1,556 @@
+{
+  "log": {
+    "level": "error",
+    "output": "sing-box-1.11.log",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "cloudflare",
+        "address": "https://1.1.1.1/dns-query",
+        "detour": "Proxy"
+      },
+      {
+        "tag": "ali",
+        "address": "https://223.6.6.6/dns-query",
+        "detour": "direct"
+      },
+      {
+        "tag": "block",
+        "address": "rcode://success"
+      }
+    ],
+    "rules": [
+      {
+        "outbound": "any",
+        "server": "ali"
+      },
+      {
+        "clash_mode": "Direct",
+        "server": "ali"
+      },
+      {
+        "clash_mode": "Global",
+        "server": "cloudflare"
+      },
+      {
+        "rule_set": [
+          "alibaba",
+          "category-games@cn"
+        ],
+        "server": "ali"
+      },
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          {
+            "clash_mode": "AllowAds",
+            "invert": true
+          },
+          {
+            "rule_set": [
+              "AWAvenue-Ads",
+              "category-ads-all"
+            ]
+          }
+        ],
+        "action": "route-options",
+        "disable_cache": true
+      },
+      {
+        "rule_set": "cn-domain",
+        "server": "ali"
+      }
+    ],
+    "strategy": "prefer_ipv4",
+    "independent_cache": true
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "mtu": 9000,
+      "address": "172.19.0.1/30",
+      "auto_route": true,
+      "stack": "system"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "selector",
+      "tag": "Proxy",
+      "outbounds": null,
+      "providers": [
+        "sntp",
+        "ll",
+        "ruaue"
+      ],
+      "exclude": "E1|N1|E2",
+      "include": "HK|AZ|JP|SG|TW",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "selector",
+      "tag": "Netflix",
+      "outbounds": [
+        "Hong Kong",
+        "Singapore",
+        "Japan",
+        "US"
+      ],
+      "providers": null
+    },
+    {
+      "type": "selector",
+      "tag": "Youtube",
+      "outbounds": [
+        "Hong Kong",
+        "Singapore",
+        "Taiwan",
+        "Japan",
+        "US"
+      ],
+      "providers": null
+    },
+    {
+      "type": "selector",
+      "tag": "Telegram",
+      "outbounds": null,
+      "providers": [
+        "sntp",
+        "ll",
+        "ruaue"
+      ],
+      "exclude": "HK",
+      "include": "JP|SG|TW|US",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "selector",
+      "tag": "US",
+      "outbounds": null,
+      "providers": [
+        "sntp",
+        "ll",
+        "ruaue"
+      ],
+      "include": "US",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "selector",
+      "tag": "OpenAI",
+      "outbounds": [
+        "Singapore",
+        "Taiwan",
+        "Japan",
+        "US"
+      ],
+      "providers": null
+    },
+    {
+      "type": "selector",
+      "tag": "Hong Kong",
+      "outbounds": null,
+      "providers": [
+        "sntp",
+        "ll",
+        "ruaue"
+      ],
+      "include": "HK",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "selector",
+      "tag": "Taiwan",
+      "outbounds": null,
+      "providers": [
+        "sntp",
+        "ll",
+        "ruaue"
+      ],
+      "include": "TW",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "selector",
+      "tag": "Japan",
+      "outbounds": null,
+      "providers": [
+        "sntp",
+        "ll",
+        "ruaue"
+      ],
+      "include": "JP",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "selector",
+      "tag": "Singapore",
+      "outbounds": null,
+      "providers": [
+        "sntp",
+        "ll",
+        "ruaue"
+      ],
+      "include": "SG",
+      "interrupt_exist_connections": true
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "type": "logical",
+        "mode": "or",
+        "rules": [
+          {
+            "port": 53
+          },
+          {
+            "protocol": "dns"
+          }
+        ],
+        "action": "hijack-dns"
+      },
+      {
+        "clash_mode": "Direct",
+        "outbound": "direct"
+      },
+      {
+        "clash_mode": "Global",
+        "outbound": "Proxy"
+      },
+      {
+        "rule_set": [
+          "alibaba",
+          "category-games@cn",
+          "apple@cn",
+          "private",
+          "geosite-cn"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          {
+            "clash_mode": "AllowAds",
+            "invert": true
+          },
+          {
+            "rule_set": [
+              "AWAvenue-Ads",
+              "category-ads-all",
+              "geosite-adblockplus",
+              "category-httpdns-cn",
+              "adguard"
+            ]
+          }
+        ],
+        "action": "reject",
+        "method": "default"
+      },
+      {
+        "domain": "snauth.wps.cn",
+        "action": "reject",
+        "method": "default"
+      },
+      {
+        "rule_set": "cn-domain",
+        "outbound": "direct"
+      },
+      {
+        "rule_set": "geosite-netflix",
+        "outbound": "Netflix"
+      },
+      {
+        "rule_set": "geosite-openai",
+        "outbound": "OpenAI"
+      },
+      {
+        "rule_set": "geoip-telegram",
+        "outbound": "Telegram"
+      },
+      {
+        "rule_set": "geosite-youtube",
+        "outbound": "Youtube"
+      },
+      {
+        "rule_set": [
+          "geosite-google",
+          "geosite-google-cn"
+        ],
+        "outbound": "US"
+      },
+      {
+        "domain": [
+          "dl.google.com",
+          "www.gstatic.com"
+        ],
+        "domain_suffix": "googleapis.com",
+        "outbound": "US"
+      },
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          {
+            "rule_set": "geolocation-!cn",
+            "invert": true
+          },
+          {
+            "rule_set": [
+              "geoip-cn",
+              "geosite-cn"
+            ]
+          }
+        ],
+        "outbound": "direct"
+      },
+      {
+        "rule_set": "cn-ip",
+        "outbound": "direct"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      }
+    ],
+    "rule_set": [
+      {
+        "type": "remote",
+        "tag": "AWAvenue-Ads",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/TG-Twilight/AWAvenue-Ads-Rule/main/Filters/AWAvenue-Ads-Rule-Singbox.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "category-ads-all",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/CHIZI-0618/v2ray-rules-dat/release/singbox_rule_set/geosite-category-ads-all.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "alibaba",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-alibaba.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "category-games@cn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-games@cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geolocation-!cn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/CHIZI-0618/v2ray-rules-dat/release/singbox_rule_set/geosite-geolocation-!cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "cn-domain",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/CHIZI-0618/v2ray-rules-dat/release/singbox_rule_set/geosite-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "cn-ip",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip/cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "240h0m0s"
+      },
+      {
+        "type": "local",
+        "tag": "adguard",
+        "format": "binary",
+        "path": "./rule_set/adguard.srs"
+      },
+      {
+        "type": "remote",
+        "tag": "category-httpdns-cn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/ruaue/v2ray-rules-dat/release/singbox_rule_set/geosite-category-httpdns-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "apple@cn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple@cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "private",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-google-cn",
+        "format": "binary",
+        "url": "https://raw.github.com/ruaue/v2ray-rules-dat/release/singbox_rule_set/geosite-google-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-cn",
+        "format": "binary",
+        "url": "https://raw.github.com/ruaue/v2ray-rules-dat/release/singbox_rule_set/geosite-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-geolocation-cn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geoip-cn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-netflix",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-openai",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "local",
+        "tag": "geoip-telegram",
+        "format": "binary",
+        "path": "./rule_set/geoip-telegram.srs"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-adblockplus",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-adblockplus.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-youtube",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-hulu",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-hulu.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-google",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+        "download_detour": "Proxy",
+        "update_interval": "24h0m0s"
+      }
+    ],
+    "final": "Proxy",
+    "prefer_use_fqdn": true,
+    "always_resolve_udp": true,
+    "find_process": true,
+    "auto_detect_interface": true
+  },
+  "providers": [
+    {
+      "type": "remote",
+      "tag": "sntp",
+      "url": "https://sub.tlle.eu.org/GZRvr85LTqFwnTjTj47M/download/SNTP?target=sing-box",
+      "update_interval": "24h0m0s",
+      "path": "providers/sntp.txt",
+      "download_detour": "direct"
+    },
+    {
+      "type": "remote",
+      "tag": "ll",
+      "url": "https://sub.tlle.eu.org/GZRvr85LTqFwnTjTj47M/download/LINKELESS?target=sing-box",
+      "update_interval": "24h0m0s",
+      "path": "providers/ll.txt",
+      "download_detour": "direct"
+    },
+    {
+      "type": "remote",
+      "tag": "ruaue",
+      "url": "https://gist.githubusercontent.com/debiansid/53195eabc0d1be57309f6bd6d0ab3d63/raw/rnetx.json",
+      "update_interval": "24h0m0s",
+      "path": "providers/ruaue.txt",
+      "download_detour": "Proxy"
+    }
+  ],
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "cache1.11.db"
+    },
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "external_ui": "yacd-gh-pages",
+      "external_ui_download_url": "https://github.com/CHIZI-0618/yacd/archive/gh-pages.zip",
+      "external_ui_download_detour": "Proxy",
+      "default_mode": "Rule",
+      "access_control_allow_origin": [
+        "http://127.0.0.1",
+        "https://yacd.ruaue.com",
+        "https://yacd.zend.eu.org",
+        "https://chizi-0618.github.io/",
+        "https://zend.eu.org"
+      ],
+      "access_control_allow_private_network": true
+    }
+  }
+}
