@@ -28,7 +28,7 @@ unzip -o "$ZIPFILE" 'box/*' -d $unzip_path >&2
 unzip -j -o "$ZIPFILE" 'box4pixel_service.sh' -d /data/adb/service.d >&2
 unzip -j -o "$ZIPFILE" 'uninstall.sh' -d $MODPATH >&2
 unzip -j -o "$ZIPFILE" "module.prop" -d $MODPATH >&2
-#mkdir -p /data/adb/box/run/
+mkdir -p /data/adb/box/run/
 ui_print "- 正在设置权限"
 set_perm /data/adb/service.d/box4pixel_service.sh 0 0 0755
 set_perm $MODPATH/uninstall.sh 0 0 0755
