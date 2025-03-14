@@ -1,6 +1,6 @@
 {
-    "version": "v4.27",
+    "version": "v0.1",
     "versionCode": 202410081122,
-    "zipUrl": "https://github.com/debiansid/box4magisk/releases/download/v4.27/box4_v4.27.zip",
-    "changelog": "https://raw.githubusercontent.com/debiansid/box4magisk/main/changelog.md"
+    "zipUrl": "https://github.com/debiansid/box4pixel/releases/download/v0.1/box4pixel_v0.1.zip",
+    "changelog": "https://raw.githubusercontent.com/debiansid/box4pixel/main/changelog.md"
 }
