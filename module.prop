@@ -1,6 +1,6 @@
 id=box4-pixel
 name=Box4Pixel
-version=v0.1
+version=v0.2
 versionCode=001
 author=zen
 description=Use sing-box on Google Pixel devices.
