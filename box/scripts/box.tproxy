@@ -60,15 +60,13 @@ start_tproxy() {
   ${iptables} -t mangle -F LOCAL_IP_V4
   ${iptables} -t mangle -A BOX_EXTERNAL -j LOCAL_IP_V4
 
-  ${iptables} -t mangle -A BOX_EXTERNAL -p tcp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
   ${iptables} -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
 
   if [ "${ap_list}" != "" ] ; then
     for ap in ${ap_list[@]} ; do
-      ${iptables} -t mangle -A BOX_EXTERNAL -p tcp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
       ${iptables} -t mangle -A BOX_EXTERNAL -p udp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
     done
-    log Info "${ap_list[*]} transparent proxy."
+    log Info "${ap_list[*]} transparent proxy for UDP."
   fi
 
   ${iptables} -t mangle -I PREROUTING -j BOX_EXTERNAL
@@ -92,47 +90,40 @@ start_tproxy() {
 
   if [ "${proxy_mode}" = "blacklist" ] ; then
     if [ "${uid_list}" = "" ] ; then
-      ${iptables} -t mangle -A BOX_LOCAL -p tcp -j MARK --set-xmark ${mark_id}
       ${iptables} -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark ${mark_id}
-      log Info "transparent proxy for all apps."
+      log Info "transparent proxy for all apps (UDP)."
     else
       for appid in ${uid_list[@]} ; do
         ${iptables} -t mangle -A BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
       done
-      ${iptables} -t mangle -A BOX_LOCAL -p tcp -j MARK --set-xmark ${mark_id}
       ${iptables} -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark ${mark_id}
-      log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} no transparent proxy."
+      log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} no transparent proxy (UDP)."
     fi
     if [ "${gid_list}" != "" ] ; then
       for gid in ${gid_list[@]} ; do
         ${iptables} -t mangle -A BOX_LOCAL -m owner --gid-owner ${gid} -j RETURN
       done
-      log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} no transparent proxy."
+      log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} no transparent proxy (UDP)."
     fi
   elif [ "${proxy_mode}" = "whitelist" ] ; then
     if [ "${uid_list}" != "" ] ; then
       for appid in ${uid_list[@]} ; do
-        ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --uid-owner ${appid} -j MARK --set-xmark ${mark_id}
         ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --uid-owner ${appid} -j MARK --set-xmark ${mark_id}
       done
-      ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --uid-owner 0 -j MARK --set-xmark ${mark_id}
       ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --uid-owner 0 -j MARK --set-xmark ${mark_id}
-      ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --uid-owner 1052 -j MARK --set-xmark ${mark_id}
       ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --uid-owner 1052 -j MARK --set-xmark ${mark_id}
-      log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} transparent proxy."
+      log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} transparent proxy (UDP)."
     fi
     if [ "${gid_list}" != "" ] ; then
       for gid in ${gid_list[@]} ; do
-        ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --gid-owner ${gid} -j MARK --set-xmark ${mark_id}
         ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --gid-owner ${gid} -j MARK --set-xmark ${mark_id}
       done
-      log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} transparent proxy."
+      log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} transparent proxy (UDP)."
     fi
   else
     log Warn "proxy mode: ${proxy_mode} error."
-    ${iptables} -t mangle -A BOX_LOCAL -p tcp -j MARK --set-xmark ${mark_id}
     ${iptables} -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark ${mark_id}
-    log Info "transparent proxy for all apps."
+    log Info "transparent proxy for all apps (UDP)."
   fi
 
   ${iptables} -t mangle -I OUTPUT -j BOX_LOCAL
@@ -141,9 +132,9 @@ start_tproxy() {
   ${iptables} -t mangle -F DIVERT
   ${iptables} -t mangle -A DIVERT -j MARK --set-xmark ${mark_id}
   ${iptables} -t mangle -A DIVERT -j ACCEPT
-  ${iptables} -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
+  ${iptables} -t mangle -I PREROUTING -p udp -m socket -j DIVERT
 
-  ${iptables} -A OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${tproxy_port} -j REJECT
+  ${iptables} -A OUTPUT -d 127.0.0.1 -p udp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m udp --dport ${tproxy_port} -j REJECT
 }
 
 stop_tproxy() {
@@ -152,7 +143,7 @@ stop_tproxy() {
   ip route flush table ${table_id} >> /dev/null 2>&1
 
   ${iptables} -t mangle -D PREROUTING -j BOX_EXTERNAL >> /dev/null 2>&1
-  ${iptables} -t mangle -D PREROUTING -p tcp -m socket -j DIVERT >> /dev/null 2>&1
+  ${iptables} -t mangle -D PREROUTING -p udp -m socket -j DIVERT >> /dev/null 2>&1
   ${iptables} -t mangle -D OUTPUT -j BOX_LOCAL >> /dev/null 2>&1
 
   ${iptables} -t mangle -F BOX_EXTERNAL >> /dev/null 2>&1
@@ -164,12 +155,110 @@ stop_tproxy() {
   ${iptables} -t mangle -F DIVERT >> /dev/null 2>&1
   ${iptables} -t mangle -X DIVERT >> /dev/null 2>&1
 
-  ${iptables} -D OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${tproxy_port} -j REJECT >> /dev/null 2>&1
+  ${iptables} -D OUTPUT -d 127.0.0.1 -p udp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m udp --dport ${tproxy_port} -j REJECT >> /dev/null 2>&1
+}
+
+start_redirect() {
+  iptables="iptables -w 100"
+  ${iptables} -t nat -N BOX_EXTERNAL
+  ${iptables} -t nat -F BOX_EXTERNAL
+  ${iptables} -t nat -N BOX_LOCAL
+  ${iptables} -t nat -F BOX_LOCAL
+
+  ${iptables} -t nat -A BOX_EXTERNAL -p udp --dport 53 -j REDIRECT --to-ports ${redir_port}
+  ${iptables} -t nat -A BOX_LOCAL -p udp --dport 53 -j REDIRECT --to-ports ${redir_port}
+
+  for subnet in ${intranet[@]} ; do
+    ${iptables} -t nat -A BOX_EXTERNAL -d ${subnet} -j RETURN
+    ${iptables} -t nat -A BOX_LOCAL -d ${subnet} -j RETURN
+  done
+  ${iptables} -t nat -N LOCAL_IP_V4
+  ${iptables} -t nat -F LOCAL_IP_V4
+  ${iptables} -t nat -A BOX_EXTERNAL -j LOCAL_IP_V4
+  ${iptables} -t nat -A BOX_LOCAL -j LOCAL_IP_V4
+
+  ${iptables} -t nat -A BOX_EXTERNAL -p tcp -i lo -j REDIRECT --to-ports ${redir_port}
+
+  if [ "${ap_list}" != "" ] ; then
+    for ap in ${ap_list[@]} ; do
+      ${iptables} -t nat -A BOX_EXTERNAL -p tcp -i ${ap} -j REDIRECT --to-ports ${redir_port}
+    done
+    log Info "${ap_list[*]} transparent proxy for TCP."
+  fi
+
+  ${iptables} -t nat -I PREROUTING -j BOX_EXTERNAL
+
+  ${iptables} -t nat -A BOX_LOCAL -m owner --uid-owner ${box_user} --gid-owner ${box_group} -j RETURN
+
+  if [ "${ignore_out_list}" != "" ] ; then
+    for ignore in ${ignore_out_list[@]} ; do
+      ${iptables} -t nat -A BOX_LOCAL -o ${ignore} -j RETURN
+    done
+    log Info "${ignore_out_list[*]} ignore transparent proxy."
+  fi
+
+  if [ "${proxy_mode}" = "blacklist" ] ; then
+    if [ "${uid_list}" = "" ] ; then
+      ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
+      log Info "transparent proxy for all apps (TCP)."
+    else
+      for appid in ${uid_list[@]} ; do
+        ${iptables} -t nat -A BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
+      done
+      ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
+      log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} no transparent proxy (TCP)."
+    fi
+    if [ "${gid_list}" != "" ] ; then
+      for gid in ${gid_list[@]} ; do
+        ${iptables} -t nat -A BOX_LOCAL -m owner --gid-owner ${gid} -j RETURN
+      done
+      log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} no transparent proxy (TCP)."
+    fi
+  elif [ "${proxy_mode}" = "whitelist" ] ; then
+    if [ "${uid_list}" != "" ] ; then
+      for appid in ${uid_list[@]} ; do
+        ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner ${appid} -j REDIRECT --to-ports ${redir_port}
+      done
+      ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner 0 -j REDIRECT --to-ports ${redir_port}
+      ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner 1052 -j REDIRECT --to-ports ${redir_port}
+      log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} transparent proxy (TCP)."
+    fi
+    if [ "${gid_list}" != "" ] ; then
+      for gid in ${gid_list[@]} ; do
+        ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --gid-owner ${gid} -j REDIRECT --to-ports ${redir_port}
+      done
+      log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} transparent proxy (TCP)."
+    fi
+  else
+    log Warn "proxy mode: ${proxy_mode} error."
+    ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
+    log Info "transparent proxy for all apps (TCP)."
+  fi
+
+  ${iptables} -t nat -I OUTPUT -j BOX_LOCAL
+
+  ${iptables} -A OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${redir_port} -j REJECT
+}
+
+stop_redirect() {
+  iptables="iptables -w 100"
+  ${iptables} -t nat -D PREROUTING -j BOX_EXTERNAL >> /dev/null 2>&1
+  ${iptables} -t nat -D OUTPUT -j BOX_LOCAL >> /dev/null 2>&1
+  ${iptables} -D OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${redir_port} -j REJECT >> /dev/null 2>&1
+  ${iptables} -D OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner 0 --gid-owner 3005 -m tcp --dport ${redir_port} -j REJECT >> /dev/null 2>&1
+
+  ${iptables} -t nat -F BOX_EXTERNAL >> /dev/null 2>&1
+  ${iptables} -t nat -X BOX_EXTERNAL >> /dev/null 2>&1
+  ${iptables} -t nat -F BOX_LOCAL >> /dev/null 2>&1
+  ${iptables} -t nat -X BOX_LOCAL >> /dev/null 2>&1
+  ${iptables} -t nat -F LOCAL_IP_V4 >> /dev/null 2>&1
+  ${iptables} -t nat -X LOCAL_IP_V4 >> /dev/null 2>&1
 }
 
 case "$1" in
   enable)
     stop_tproxy >> /dev/null 2>&1
+    stop_redirect >> /dev/null 2>&1
     sleep 1
     if ! probe_user_group ; then
       log Error "failed to check Box user group, please make sure ${bin_name} core is started."
@@ -178,9 +267,10 @@ case "$1" in
     find_packages_uid
     intranet[${#intranet[@]}]=$(ip -4 a | awk '/inet/ {print $2}' | grep -vE "^127.0.0.1")
     if (zcat /proc/config.gz | grep -q TPROXY) ; then
-      log Info "use TPROXY:TCP+UDP."
+      log Info "use TPROXY for UDP and REDIRECT for TCP."
       log Info "creating iptables transparent proxy rules."
-      start_tproxy && log Info "create iptables transparent proxy rules done." || (log Error "create iptables transparent proxy rules failed." && stop_tproxy >> /dev/null 2>&1)
+      start_tproxy && start_redirect && log Info "create iptables transparent proxy rules done." || \
+      (log Error "create iptables transparent proxy rules failed." && stop_tproxy >> /dev/null 2>&1 && stop_redirect >> /dev/null 2>&1)
     else
       log Error "the device does not support TPROXY, please ensure kernel compatibility."
       return 1
@@ -190,12 +280,14 @@ case "$1" in
     log Warn "cleaning up iptables transparent proxy rules."
     probe_user_group
     stop_tproxy >> /dev/null 2>&1
+    stop_redirect >> /dev/null 2>&1
     log Warn "clean up iptables transparent proxy rules done."
     return 0
     ;;
   renew)
     log Warn "cleaning up iptables transparent proxy rules."
     stop_tproxy >> /dev/null 2>&1
+    stop_redirect >> /dev/null 2>&1
     log Warn "clean up iptables transparent proxy rules done."
     sleep 3
     if ! probe_user_group ; then
@@ -205,9 +297,10 @@ case "$1" in
     find_packages_uid
     intranet[${#intranet[@]}]=$(ip -4 a | awk '/inet/ {print $2}' | grep -vE "^127.0.0.1")
     if (zcat /proc/config.gz | grep -q TPROXY) ; then
-      log Info "use TPROXY:TCP+UDP."
+      log Info "use TPROXY for UDP and REDIRECT for TCP."
       log Info "creating iptables transparent proxy rules."
-      start_tproxy && log Info "create iptables transparent proxy rules done." || (log Error "create iptables transparent proxy rules failed." && stop_tproxy >> /dev/null 2>&1)
+      start_tproxy && start_redirect && log Info "create iptables transparent proxy rules done." || \
+      (log Error "create iptables transparent proxy rules failed." && stop_tproxy >> /dev/null 2>&1 && stop_redirect >> /dev/null 2>&1)
     else
       log Error "the device does not support TPROXY, please ensure kernel compatibility."
       return 1
