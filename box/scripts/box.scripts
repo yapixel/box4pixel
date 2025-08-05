@@ -1,238 +1,385 @@
 #!/system/bin/sh
 
- export PATH="/data/adb/magisk:/data/adb/ksu/bin:$PATH:/data/data/com.termux/files/usr/bin"
- 
- clear; cd ${0%/*}
+# Ensure script runs as root
+[ "$(id -u)" -ne 0 ] && { echo "This script must be run as root"; exit 1; }
 
-  normal=$(printf '\033[0m'); green=$(printf '\033[0;32m'); red=$(printf '\033[91m')
+# Set PATH for Magisk, KernelSU, and Termux binaries
+export PATH="/data/adb/magisk:/data/adb/ksu/bin:$PATH:/data/data/com.termux/files/usr/bin"
 
-  scripts=$(realpath $0)
-  scripts_dir=$(dirname ${scripts})
-  source ${scripts_dir}/box.config
-  id="222"
- 
+# Change to script directory and clear terminal
+clear; cd ${0%/*}
 
+# Define color codes and output type
+normal=$(printf '\033[0m'); green=$(printf '\033[0;32m'); red=$(printf '\033[91m')
+[ -t 1 ] && color_output=1 || color_output=0
+
+# Script paths and configuration
+scripts=$(realpath $0)
+scripts_dir=$(dirname ${scripts})
+source ${scripts_dir}/box.config
+id="222"
+log_file="../run/box.log"
+
+# Logging function with file output
 log() {
   export TZ=Asia/Shanghai
   now=$(date +"[%Y-%m-%d %H:%M:%S %Z]")
   case $1 in
-    Info)
-      [ -t 1 ] && echo -e "\033[1;32m${now} [Info]: $2\033[0m" || echo "${now} [Info]: $2"
-      ;;
-    Warn)
-      [ -t 1 ] && echo -e "\033[1;33m${now} [Warn]: $2\033[0m" || echo "${now} [Warn]: $2"
-      ;;
-    Error)
-      [ -t 1 ] && echo -e "\033[1;31m${now} [Error]: $2\033[0m" || echo "${now} [Error]: $2"
-      ;;
-    *)
-      [ -t 1 ] && echo -e "\033[1;30m${now} [$1]: $2\033[0m" || echo "${now} [$1]: $2"
-      ;;
+    Info) color="\033[1;32m";;
+    Warn) color="\033[1;33m";;
+    Error) color="\033[1;31m";;
+    *) color="\033[1;30m";;
   esac
+  msg="${now} [$1]: $2"
+  [ $color_output -eq 1 ] && echo -e "${color}${msg}\033[0m" || echo "${msg}"
+  echo "${msg}" >> "${log_file}"
 }
 
+# Validate configuration variables
+validate_config() {
+  [ ! -f "${binfile}" ] && { log Error "Binary file ${binfile} not found"; exit 1; }
+  [ ! -f "${workfile}" ] && { log Error "Config file ${workfile} not found"; exit 1; }
+  [ -z "${tproxy_port}" ] || [ -z "${redir_port}" ] && { log Error "tproxy_port or redir_port not set"; exit 1; }
+  [ -z "${tun_device}" ] && { log Error "tun_device not set"; exit 1; }
+  [ -z "${mode}" ] || ! [[ "${mode}" =~ ^(tproxy|tun|enhance)$ ]] && { log Error "Invalid mode: ${mode}"; exit 1; }
+  for ap in ${ap_list[@]}; do
+    [[ "${ap}" =~ ^[a-zA-Z0-9+]+$ ]] || { log Error "Invalid interface name: ${ap}"; exit 1; }
+  done
+  for pkg in ${user_packages_list[@]}; do
+    [[ "${pkg}" =~ ^[0-9]*:[a-zA-Z0-9._]+$ || "${pkg}" =~ ^[a-zA-Z0-9._]+$ ]] || { log Error "Invalid package name: ${pkg}"; exit 1; }
+  done
+  log Info "Configuration validated successfully"
+}
+
+# Generate UID list efficiently
 uid_list=()
 find_packages_uid() {
-  for user_package in ${user_packages_list[@]} ; do
+  uid_list=()
+  awk_script=$(printf 'BEGIN {FS=" "}; ')
+  for user_package in ${user_packages_list[@]}; do
     user=$(echo ${user_package} | awk -F ':' '{print $1}')
     package=$(echo ${user_package} | awk -F ':' '{print $2}')
-    uid_list[${#uid_list[@]}]=$(expr ${user} \* "100000" + $(awk '{if($1=="'${package}'"){print $2}}' /data/system/packages.list))
+    awk_script+="\$1==\"${package}\" {print (${user:-0} * 100000) + \$2; next} "
+  done
+  awk_script+='{next}'
+  uid_list=($(awk "${awk_script}" /data/system/packages.list))
+  [ ${#uid_list[@]} -eq 0 ] && [ ${#user_packages_list[@]} -gt 0 ] && log Warn "No UIDs found for some packages in user_packages_list"
+}
+
+# Create TUN device link
+create_tun_link() {
+  mkdir -p /dev/net
+  [ ! -L /dev/net/tun ] && ln -s /dev/tun /dev/net/tun && log Info "Created TUN link /dev/net/tun"
+}
+
+# Probe TUN device
+probe_tun_device() {
+  ifconfig | grep -q ${tun_device} || { log Error "TUN device ${tun_device} not found"; return 1; }
+}
+
+# Common iptables rules for intranet bypass
+setup_common_rules() {
+  for subnet in ${intranet[@]}; do
+    iptables -w 100 -t mangle -A BOX_EXTERNAL -d ${subnet} -p udp ! --dport 53 -j RETURN
+    iptables -w 100 -t mangle -A BOX_EXTERNAL -d ${subnet} ! -p udp -j RETURN
+  done
+  [ "${ipv6}" != "disable" ] && for subnet6 in ${intranet6[@]}; do
+    ip6tables -w 100 -t mangle -A BOX_EXTERNAL -d ${subnet6} -p udp ! --dport 53 -j RETURN
+    ip6tables -w 100 -t mangle -A BOX_EXTERNAL -d ${subnet6} ! -p udp -j RETURN
   done
 }
 
-create_tun_link() {
-  mkdir -p /dev/net
-  [ ! -L /dev/net/tun ] && ln -s /dev/tun /dev/net/tun
-}
-
-probe_tun_device() {
-  ifconfig | grep -q ${tun_device} || return 1
-}
-
+# Forward rules for TUN mode
 forward() {
   iptables -w 100 $1 FORWARD -p udp -o ${tun_device} -j ACCEPT
   iptables -w 100 $1 FORWARD -p udp -i ${tun_device} -j ACCEPT
-  ip6tables -w 100 $1 FORWARD -p udp -o ${tun_device} -j ACCEPT
-  ip6tables -w 100 $1 FORWARD -p udp -i ${tun_device} -j ACCEPT
+  [ "${ipv6}" != "disable" ] && {
+    ip6tables -w 100 $1 FORWARD -p udp -o ${tun_device} -j ACCEPT
+    ip6tables -w 100 $1 FORWARD -p udp -i ${tun_device} -j ACCEPT
+  }
 }
 
+# Enhance mode: TCP REDIRECT and UDP TPROXY
+start_enhance() {
+  # TCP redirect (NAT table)
+  iptables -w 100 -t nat -N BOX_EXTERNAL
+  iptables -w 100 -t nat -F BOX_EXTERNAL
+  iptables -w 100 -t nat -N BOX_LOCAL
+  iptables -w 100 -t nat -F BOX_LOCAL
+
+  iptables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i lo -j REDIRECT --to-ports ${redir_port}
+  if [ "${ap_list}" != "" ]; then
+    for ap in ${ap_list[@]}; do
+      iptables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i ${ap} -j REDIRECT --to-ports ${redir_port}
+    done
+    log Info "${ap_list[*]} TCP transparent proxy"
+  fi
+
+  iptables -w 100 -t nat -I PREROUTING -j BOX_EXTERNAL
+  iptables -w 100 -t nat -I BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
+
+  if [ "${uid_list}" = "" ]; then
+    iptables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
+    log Info "TCP transparent proxy for all apps"
+  else
+    for appid in ${uid_list[@]}; do
+      iptables -w 100 -t nat -A BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
+    done
+    iptables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
+    log Info "TCP proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy"
+  fi
+
+  iptables -w 100 -t nat -I OUTPUT -j BOX_LOCAL
+  iptables -w 100 -A OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport ${redir_port} -j REJECT
+
+  # UDP TPROXY
+  ip rule add fwmark ${id} table ${id} pref ${id}
+  ip route add local default dev lo table ${id}
+
+  iptables -w 100 -t mangle -N BOX_EXTERNAL
+  iptables -w 100 -t mangle -F BOX_EXTERNAL
+  iptables -w 100 -t mangle -N BOX_LOCAL
+  iptables -w 100 -t mangle -F BOX_LOCAL
+
+  iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp --dport 53 -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
+  setup_common_rules
+
+  iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -m socket --transparent -j MARK --set-xmark ${id}
+  iptables -w 100 -t mangle -A BOX_EXTERNAL -m socket -j RETURN
+  iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
+  if [ "${ap_list}" != "" ]; then
+    for ap in ${ap_list[@]}; do
+      iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
+    done
+    log Info "${ap_list[*]} UDP transparent proxy"
+  fi
+
+  iptables -w 100 -t mangle -I PREROUTING -j BOX_EXTERNAL
+  iptables -w 100 -t mangle -A BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
+
+  if [ "${uid_list}" = "" ]; then
+    iptables -w 100 -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark ${id}
+    log Info "UDP transparent proxy for all apps, including DNS"
+  else
+    for appid in ${uid_list[@]}; do
+      iptables -w 100 -t mangle -A BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
+    done
+    iptables -w 100 -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark ${id}
+    log Info "UDP proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy, DNS via TPROXY"
+  fi
+
+  iptables -w 100 -t mangle -I OUTPUT -j BOX_LOCAL
+  iptables -w 100 -t mangle -N DIVERT
+  iptables -w 100 -t mangle -F DIVERT
+  iptables -w 100 -t mangle -A DIVERT -j MARK --set-xmark ${id}
+  iptables -w 100 -t mangle -A DIVERT -j ACCEPT
+  iptables -w 100 -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
+  iptables -w 100 -A OUTPUT -d 127.0.0.1 -p udp -m owner --gid-owner 23333 --dport ${tproxy_port} -j REJECT
+}
+
+# Stop enhance mode
+stop_enhance() {
+  iptables -w 100 -t nat -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t nat -D OUTPUT -j BOX_LOCAL 2>/dev/null
+  iptables -w 100 -t nat -F BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t nat -X BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t nat -F BOX_LOCAL 2>/dev/null
+  iptables -w 100 -t nat -X BOX_LOCAL 2>/dev/null
+  iptables -w 100 -D OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport ${redir_port} -j REJECT 2>/dev/null
+
+  ip rule del fwmark ${id} table ${id} 2>/dev/null
+  ip route flush table ${id} 2>/dev/null
+  iptables -w 100 -t mangle -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t mangle -D PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null
+  iptables -w 100 -t mangle -D OUTPUT -j BOX_LOCAL 2>/dev/null
+  iptables -w 100 -t mangle -F BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t mangle -X BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t mangle -F BOX_LOCAL 2>/dev/null
+  iptables -w 100 -t mangle -X BOX_LOCAL 2>/dev/null
+  iptables -w 100 -t mangle -F DIVERT 2>/dev/null
+  iptables -w 100 -t mangle -X DIVERT 2>/dev/null
+  iptables -w 100 -D OUTPUT -d 127.0.0.1 -p udp -m owner --gid-owner 23333 --dport ${tproxy_port} -j REJECT 2>/dev/null
+}
+
+# TPROXY mode
+start_tproxy() {
+  ip rule add fwmark ${id} table ${id} pref ${id}
+  ip route add local default dev lo table ${id}
+
+  iptables -w 100 -t mangle -N BOX_EXTERNAL
+  iptables -w 100 -t mangle -F BOX_EXTERNAL
+
+  setup_common_rules
+
+  iptables -w 100 -t mangle -A BOX_EXTERNAL -p tcp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
+  iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
+
+  if [ "${ap_list}" != "" ]; then
+    for ap in ${ap_list[@]}; do
+      iptables -w 100 -t mangle -A BOX_EXTERNAL -p tcp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
+      iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
+    done
+    log Info "${ap_list[*]} transparent proxy"
+  fi
+
+  iptables -w 100 -t mangle -I PREROUTING -j BOX_EXTERNAL
+
+  iptables -w 100 -t mangle -N BOX_LOCAL
+  iptables -w 100 -t mangle -F BOX_LOCAL
+
+  for subnet in ${intranet[@]}; do
+    iptables -w 100 -t mangle -A BOX_LOCAL -d ${subnet} -p udp ! --dport 53 -j RETURN
+    iptables -w 100 -t mangle -A BOX_LOCAL -d ${subnet} ! -p udp -j RETURN
+  done
+
+  iptables -w 100 -t mangle -A BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
+
+  if [ "${uid_list}" = "" ]; then
+    iptables -w 100 -t mangle -A BOX_LOCAL -p tcp -j MARK --set-mark ${id}
+    iptables -w 100 -t mangle -A BOX_LOCAL -p udp -j MARK --set-mark ${id}
+    log Info "transparent proxy for all apps"
+  else
+    for appid in ${uid_list[@]}; do
+      iptables -w 100 -t mangle -A BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
+    done
+    iptables -w 100 -t mangle -A BOX_LOCAL -p tcp -j MARK --set-mark ${id}
+    iptables -w 100 -t mangle -A BOX_LOCAL -p udp -j MARK --set-mark ${id}
+    log Info "proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy"
+  fi
+
+  iptables -w 100 -t mangle -I OUTPUT -j BOX_LOCAL
+
+  iptables -w 100 -t mangle -N DIVERT
+  iptables -w 100 -t mangle -F DIVERT
+  iptables -w 100 -t mangle -A DIVERT -j MARK --set-mark ${id}
+  iptables -w 100 -t mangle -A DIVERT -j ACCEPT
+  iptables -w 100 -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
+
+  iptables -w 100 -A OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport ${tproxy_port} -j REJECT
+}
+
+# Stop TPROXY mode
+stop_tproxy() {
+  ip rule del fwmark ${id} table ${id} 2>/dev/null
+  ip route flush table ${id} 2>/dev/null
+
+  iptables -w 100 -t mangle -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t mangle -D PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null
+  iptables -w 100 -t mangle -D OUTPUT -j BOX_LOCAL 2>/dev/null
+  iptables -w 100 -t mangle -F BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t mangle -X BOX_EXTERNAL 2>/dev/null
+  iptables -w 100 -t mangle -F BOX_LOCAL 2>/dev/null
+  iptables -w 100 -t mangle -X BOX_LOCAL 2>/dev/null
+  iptables -w 100 -t mangle -F DIVERT 2>/dev/null
+  iptables -w 100 -t mangle -X DIVERT 2>/dev/null
+  iptables -w 100 -D OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport ${tproxy_port} -j REJECT 2>/dev/null
+}
+
+# TUN mode
+start_tun() {
+  create_tun_link
+  if ! probe_tun_device; then
+    log Error "TUN device ${tun_device} not found or not configured"
+    exit 1
+  fi
+  forward -I
+  log Info "TUN device ${tun_device} started"
+}
+
+# Stop TUN mode
+stop_tun() {
+  forward -D >/dev/null 2>&1
+  log Info "TUN device ${tun_device} stopped"
+}
+
+# Start proxy
 start() {
+  validate_config
+  [ -f "${log_file}" ] && [ $(stat -c %s "${log_file}") -gt 1048576 ] && mv "${log_file}" "${log_file}.old"
   if [ -f "${binfile}" ]; then
-    chmod 755 ${binfile}
-    chown root:net_admin ${binfile}
+    chmod 755 "${binfile}"
+    chown root:net_admin "${binfile}"
+    chmod 600 "${workfile}"
+    mkdir -p ../run
+    chmod 700 ../run
     ulimit -SHn 1048576
     case "${mode}" in
-            tproxy) start_tproxy ;;
-            tun)    start_tun ;;
+      tproxy) start_tproxy ;;
+      tun) start_tun ;;
+      enhance) start_enhance ;;
     esac
-    ${busybox} setuidgid 0:23333 nohup ${binfile} run -c ${workfile} -D ../run/ > /dev/null 2> ../run/error_sing-box.log &
+    ${busybox} setuidgid 0:23333 nohup ${binfile} run -c ${workfile} -D ../run/ >/dev/null 2> ../run/error_sing-box.log &
+    log Info "Started ${binfile} in ${mode} mode"
   fi
 }
 
+# Stop proxy
 stop() {
   PID=$(pidof ${binfile})
-  pidof ${binfile} > /dev/null 2>&1 && kill -15 ${PID} > /dev/null 2>&1
+  if [ -n "${PID}" ]; then
+    kill -15 ${PID} >/dev/null 2>&1
+    for i in {1..5}; do
+      sleep 1
+      pidof ${binfile} >/dev/null 2>&1 || { log Info "Process ${binfile} stopped"; break; }
+      [ $i -eq 5 ] && { log Error "Failed to stop ${binfile}"; kill -9 ${PID} >/dev/null 2>&1; }
+    done
+  fi
   case "${mode}" in
-        tproxy) stop_tproxy ;;
-        tun)    stop_tun ;;
+    tproxy) stop_tproxy ;;
+    tun) stop_tun ;;
+    enhance) stop_enhance ;;
   esac
-  rm ${0%/*}/uids.list
+  rm -f ${0%/*}/uids.list
+  log Info "Proxy stopped"
 }
 
-
+# Get local IP
 net_ip() {
-  local_ip=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") {print $(i+1); break}}') && echo "${local_ip}"
+  local_ip=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") {print $(i+1); break}}')
+  [ -n "${local_ip}" ] && echo "${local_ip}" || log Error "Failed to retrieve local IP"
 }
 
+# Get network ID
 net_id() {
-  # Array of WLAN interfaces
-  wlan_interfaces=( $(iw dev | awk '$1=="Interface"{print $2}') )
-
-  # Loop through WLAN interfaces
+  wlan_interfaces=($(iw dev | awk '$1=="Interface"{print $2}'))
   for interface in "${wlan_interfaces[@]}"; do
-    # Get wifi SSID for the current interface
     ssid=$(iw dev "$interface" link | awk '/SSID/{print $2}')
-    
-    # Check if ssid is not empty
     if [ -n "$ssid" ]; then
       echo "$ssid"
       return
     fi
   done
-  
-  # Default to "mobile" if no wifi SSID found
   echo "mobile"
 }
 
-start_tproxy() {
-
- 
-  ip rule add fwmark ${id} table ${id} pref ${id}
-  ip route add local default dev lo table ${id}
-  
-  
-  iptables -t mangle -N BOX_EXTERNAL
-  iptables -t mangle -F BOX_EXTERNAL
-
-  # Bypass intranet
-    for subnet in ${intranet[@]} ; do
-        iptables -t mangle -A BOX_EXTERNAL -d ${subnet} -p udp ! --dport 53 -j RETURN
-        iptables -t mangle -A BOX_EXTERNAL -d ${subnet} ! -p udp -j RETURN
-  done
- 
- 
-  
-  iptables -t mangle -A BOX_EXTERNAL -p tcp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
-  iptables -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
-  
-  # Allow ap interface
-  # Notice: Old android device may only have one wlan interface.
-  # Some new android device have multiple wlan interface like wlan0(for internet), wlan1(for AP).
-  if [ "${ap_list}" != "" ] ; then
-    for ap in ${ap_list[@]} ; do
-      iptables -t mangle -A BOX_EXTERNAL -p tcp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
-      iptables -t mangle -A BOX_EXTERNAL -p udp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${id}
-    done
-    log Info "${ap_list[*]} transparent proxy."
-  fi
-
-  iptables -t mangle -I PREROUTING -j BOX_EXTERNAL
-
-
-  iptables -t mangle -N BOX_LOCAL
-  iptables -t mangle -F BOX_LOCAL
-
-  #Bypass intranet
-  for subnet in ${intranet[@]} ; do
-        iptables -t mangle -A BOX_LOCAL -d ${subnet} -p udp ! --dport 53 -j RETURN
-        iptables -t mangle -A BOX_LOCAL -d ${subnet} ! -p udp -j RETURN
-      done
-  
-  
-  
-  # Bypass box itself
-  iptables -t mangle -I BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
-
-
-  # Bypass apps
-  if [ "${uid_list}" = "" ] ; then
-      # Route Everything
-      iptables -t mangle -A BOX_LOCAL -p tcp -j MARK --set-mark ${id}
-      iptables -t mangle -A BOX_LOCAL -p udp -j MARK --set-mark ${id}
-      log Info "transparent proxy for all apps."
-  else
-  
-  # Bypass apps
-      for appid in ${uid_list[@]} ; do
-        iptables -t mangle -I BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
-      done
-  # Allow !app
-      iptables -t mangle -A BOX_LOCAL -p tcp -j MARK --set-mark ${id}
-      iptables -t mangle -A BOX_LOCAL -p udp -j MARK --set-mark ${id}
-      log Info "proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy."
-  fi
-  
-  iptables -t mangle -I OUTPUT -j BOX_LOCAL
-
-
-  iptables -t mangle -N DIVERT
-  iptables -t mangle -F DIVERT
-
-  iptables -t mangle -A DIVERT -j MARK --set-mark ${id}
-  iptables -t mangle -A DIVERT -j ACCEPT
-
-  iptables -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
-
-  # This rule blocks local access to tproxy-port to prevent traffic loopback.
-  iptables -A OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 -m tcp --dport ${tproxy_port} -j REJECT
-
-}
-
-stop_tproxy() {
-  
-    ip rule del fwmark ${id} table ${id}
-    ip route flush table ${id}
-  
-
-  iptables -t mangle -D PREROUTING -j BOX_EXTERNAL
-    
-  iptables -t mangle -D PREROUTING -p tcp -m socket -j DIVERT
-
-  iptables -t mangle -D OUTPUT -j BOX_LOCAL
-
-  iptables -t mangle -F BOX_EXTERNAL
-  iptables -t mangle -X BOX_EXTERNAL
-
-  iptables -t mangle -F BOX_LOCAL
-  iptables -t mangle -X BOX_LOCAL
-
-  iptables -t mangle -F DIVERT
-  iptables -t mangle -X DIVERT
-
-  
-  iptables -D OUTPUT -d 127.0.0.1 -p tcp -m owner  --gid-owner 23333 -m tcp --dport ${tproxy_port} -j REJECT
-
-  
- # iptables -D OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner 0 --gid-owner 3005 -m tcp --dport ${tproxy_port} -j REJECT
-
-}
-
-start_tun() {
-
- create_tun_link
- probe_tun_device
- forward -I
-
-}
-
-stop_tun() {
-  forward -D >> /dev/null 2>&1
-}
-
-run() { 
+# Run (stop and start)
+run() {
   stop
-  start 
+  start
 }
 
-# Created on May 9 2024. 001
+# Command-line interface
+usage() {
+  echo "Usage: $0 {start|stop|run|net_ip|net_id|restart|mode <tproxy|tun|enhance>}"
+  exit 1
+}
 
+case "$1" in
+  start) start ;;
+  stop) stop ;;
+  run) run ;;
+  net_ip) net_ip ;;
+  net_id) net_id ;;
+  restart) stop; start ;;
+  mode)
+    [ -z "$2" ] || ! [[ "$2" =~ ^(tproxy|tun|enhance)$ ]] && { log Error "Invalid mode: $2"; usage; }
+    mode="$2"
+    run
+    ;;
+  *) usage ;;
+esac
+
+# Created on May 9 2024
+# Updated on August 4 2025 to add enhance mode
+# Updated on August 4 2025 to fix DNS in enhance mode
+# Optimized on August 5 2025 for performance, reliability, security, and usability
