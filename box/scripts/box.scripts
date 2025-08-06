@@ -1,7 +1,7 @@
 #!/system/bin/sh
 
 # Set PATH for Magisk, KernelSU, and Termux
-export PATH="/data/adb/magisk:/data/adb/ksu/bin:$PATH:/data/data/com.termux/files/usr/bin"
+export PATH="/data/adb/magisk:/data/adb/ksu/bin:/data/adb/ap/bin:$PATH:/data/data/com.termux/files/usr/bin"
 
 # Clear screen and change to script directory
 clear
@@ -15,7 +15,8 @@ red='\033[91m'
 # Script paths and configuration
 scripts=$(realpath "$0")
 scripts_dir=$(dirname "$scripts")
-id="222"
+mark_id="16777216/16777216"
+table_id="222"
 
 # Source configuration file
 if [ ! -f "${scripts_dir}/box.config" ]; then
@@ -71,189 +72,258 @@ forward() {
   ip6tables -w 100 "$action" FORWARD -p udp -i "${tun_device}" -j ACCEPT
 }
 
-# Shared function to set up bypass rules for intranet subnets
+# Enable IPv6 support
+enable_ipv6() {
+  echo 1 > /proc/sys/net/ipv6/conf/all/accept_ra
+  echo 1 > /proc/sys/net/ipv6/conf/wlan0/accept_ra
+  echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+  echo 0 > /proc/sys/net/ipv6/conf/default/disable_ipv6
+  echo 0 > /proc/sys/net/ipv6/conf/wlan0/disable_ipv6
+}
+
+# Disable IPv6 support
+disable_ipv6() {
+  echo 0 > /proc/sys/net/ipv6/conf/all/accept_ra
+  echo 0 > /proc/sys/net/ipv6/conf/wlan0/accept_ra
+  echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+  echo 1 > /proc/sys/net/ipv6/conf/default/disable_ipv6
+  echo 1 > /proc/sys/net/ipv6/conf/wlan0/disable_ipv6
+}
+
+# Shared function to set up bypass rules for intranet subnets (IPv4 and IPv6)
 setup_intranet_bypass() {
-  local chain=$1 table=$2
-  for subnet in "${intranet[@]}"; do
-    iptables -w 100 -t "$table" -A "$chain" -d "$subnet" -j RETURN
-    if [ "$table" = "mangle" ]; then
-      iptables -w 100 -t mangle -A "$chain" -d "$subnet" -p udp ! --dport 53 -j RETURN
-      iptables -w 100 -t mangle -A "$chain" -d "$subnet" ! -p udp -j RETURN
-    fi
-  done
+  local chain=$1 table=$2 iptables_cmd=$3
+  if [ "$iptables_cmd" = "ip6tables -w 100" ]; then
+    for subnet in "${intranet6[@]}"; do
+      $iptables_cmd -t "$table" -A "$chain" -d "$subnet" -j RETURN
+      if [ "$table" = "mangle" ]; then
+        $iptables_cmd -t mangle -A "$chain" -d "$subnet" -p udp ! --dport 53 -j RETURN
+        $iptables_cmd -t mangle -A "$chain" -d "$subnet" ! -p udp -j RETURN
+      fi
+    done
+    $iptables_cmd -t "$table" -N LOCAL_IP_V6 2>/dev/null || $iptables_cmd -t "$table" -F LOCAL_IP_V6
+    $iptables_cmd -t "$table" -A "$chain" -j LOCAL_IP_V6
+  else
+    for subnet in "${intranet[@]}"; do
+      $iptables_cmd -t "$table" -A "$chain" -d "$subnet" -j RETURN
+      if [ "$table" = "mangle" ]; then
+        $iptables_cmd -t mangle -A "$chain" -d "$subnet" -p udp ! --dport 53 -j RETURN
+        $iptables_cmd -t mangle -A "$chain" -d "$subnet" ! -p udp -j RETURN
+      fi
+    done
+    $iptables_cmd -t "$table" -N LOCAL_IP_V4 2>/dev/null || $iptables_cmd -t "$table" -F LOCAL_IP_V4
+    $iptables_cmd -t "$table" -A "$chain" -j LOCAL_IP_V4
+  fi
 }
 
 # Enhanced proxy mode setup
 start_enhance() {
-  # Initialize NAT chains
-  iptables -w 100 -t nat -N BOX_EXTERNAL 2>/dev/null || iptables -w 100 -t nat -F BOX_EXTERNAL
-  iptables -w 100 -t nat -N BOX_LOCAL 2>/dev/null || iptables -w 100 -t nat -F BOX_LOCAL
-  iptables -w 100 -t nat -N LOCAL_IP_V4 2>/dev/null || iptables -w 100 -t nat -F LOCAL_IP_V4
+  iptables="iptables -w 100"
+  # Initialize NAT chains (IPv4)
+  $iptables -t nat -N BOX_EXTERNAL 2>/dev/null || $iptables -t nat -F BOX_EXTERNAL
+  $iptables -t nat -N BOX_LOCAL 2>/dev/null || $iptables -t nat -F BOX_LOCAL
 
-  # Setup bypass for intranet subnets
-  setup_intranet_bypass BOX_EXTERNAL nat
-  setup_intranet_bypass BOX_LOCAL nat
-  iptables -w 100 -t nat -A BOX_EXTERNAL -j LOCAL_IP_V4
-  iptables -w 100 -t nat -A BOX_LOCAL -j LOCAL_IP_V4
+  # Setup bypass for intranet subnets (IPv4)
+  setup_intranet_bypass BOX_EXTERNAL nat "$iptables"
+  setup_intranet_bypass BOX_LOCAL nat "$iptables"
 
   # Configure TCP redirection for specified interfaces
   if [ -n "${ap_list}" ]; then
     for ap in "${ap_list[@]}"; do
-      iptables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i "$ap" -j REDIRECT --to-ports "${redir_port}"
+      $iptables -t nat -A BOX_EXTERNAL -p tcp -i "$ap" -j REDIRECT --to-ports "${redir_port}"
     done
     log Info "${ap_list[*]} TCP transparent proxy."
   fi
 
   # Insert NAT rules
-  iptables -w 100 -t nat -I PREROUTING -j BOX_EXTERNAL
-  iptables -w 100 -t nat -A BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
+  $iptables -t nat -I PREROUTING -j BOX_EXTERNAL
+  $iptables -t nat -A BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
 
   # Proxy mode: blacklist-like for TCP
   if [ ${#uid_list[@]} -eq 0 ]; then
-    iptables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports "${redir_port}"
+    $iptables -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports "${redir_port}"
     log Info "TCP transparent proxy for all apps."
   else
     for appid in "${uid_list[@]}"; do
-      iptables -w 100 -t nat -A BOX_LOCAL -m owner --uid-owner "$appid" -j RETURN
+      $iptables -t nat -A BOX_LOCAL -m owner --uid-owner "$appid" -j RETURN
     done
-    iptables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports "${redir_port}"
+    $iptables -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports "${redir_port}"
     log Info "TCP proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy."
   fi
 
-  iptables -w 100 -t nat -I OUTPUT -j BOX_LOCAL
-  iptables -w 100 -A OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport "${redir_port}" -j REJECT
+  $iptables -t nat -I OUTPUT -j BOX_LOCAL
+  $iptables -A OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport "${redir_port}" -j REJECT
 
-  # Initialize mangle chains for UDP TPROXY
-  iptables -w 100 -t mangle -N BOX_EXTERNAL 2>/dev/null || iptables -w 100 -t mangle -F BOX_EXTERNAL
-  iptables -w 100 -t mangle -N BOX_LOCAL 2>/dev/null || iptables -w 100 -t mangle -F BOX_LOCAL
+  # Initialize mangle chains for UDP TPROXY (IPv4 and IPv6)
+  for iptables in "iptables -w 100" "ip6tables -w 100"; do
+    $iptables -t mangle -N BOX_EXTERNAL 2>/dev/null || $iptables -t mangle -F BOX_EXTERNAL
+    $iptables -t mangle -N BOX_LOCAL 2>/dev/null || $iptables -t mangle -F BOX_LOCAL
 
-  # Setup DNS redirection
-  iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp --dport 53 -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${id}"
-  iptables -w 100 -t mangle -A BOX_LOCAL -p udp --dport 53 -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${id}"
+    # Setup DNS redirection
+    $iptables -t mangle -A BOX_EXTERNAL -p udp --dport 53 -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+    $iptables -t mangle -A BOX_LOCAL -p udp --dport 53 -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
 
-  # Setup bypass for intranet subnets
-  setup_intranet_bypass BOX_EXTERNAL mangle
+    # Setup bypass for intranet subnets
+    setup_intranet_bypass BOX_EXTERNAL mangle "$iptables"
 
-  # Configure UDP TPROXY
-  iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -m socket --transparent -j MARK --set-xmark "${id}"
-  iptables -w 100 -t mangle -A BOX_EXTERNAL -m socket -j RETURN
-  iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${id}"
-  if [ -n "${ap_list}" ]; then
-    for ap in "${ap_list[@]}"; do
-      iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -i "$ap" -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${id}"
-    done
-    log Info "${ap_list[*]} UDP transparent proxy."
-  fi
+    # Configure UDP TPROXY
+    $iptables -t mangle -A BOX_EXTERNAL -p udp -m socket --transparent -j MARK --set-xmark "${mark_id}"
+    $iptables -t mangle -A BOX_EXTERNAL -m socket -j RETURN
+    $iptables -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+    if [ -n "${ap_list}" ]; then
+      for ap in "${ap_list[@]}"; do
+        $iptables -t mangle -A BOX_EXTERNAL -p udp -i "$ap" -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+      done
+      log Info "${ap_list[*]} UDP transparent proxy ($iptables)."
+    fi
 
-  iptables -w 100 -t mangle -I PREROUTING -j BOX_EXTERNAL
-  iptables -w 100 -t mangle -A BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
+    $iptables -t mangle -I PREROUTING -j BOX_EXTERNAL
+    $iptables -t mangle -A BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
 
-  # Proxy mode: blacklist-like for UDP
-  if [ ${#uid_list[@]} -eq 0 ]; then
-    iptables -w 100 -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark "${id}"
-    log Info "UDP transparent proxy for all apps, including DNS."
-  else
-    for appid in "${uid_list[@]}"; do
-      iptables -w 100 -t mangle -A BOX_LOCAL -m owner --uid-owner "$appid" -j RETURN
-    done
-    iptables -w 100 -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark "${id}"
-    log Info "UDP proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy, DNS via TPROXY."
-  fi
+    # Proxy mode: blacklist-like for UDP
+    if [ ${#uid_list[@]} -eq 0 ]; then
+      $iptables -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark "${mark_id}"
+      log Info "UDP transparent proxy for all apps, including DNS ($iptables)."
+    else
+      for appid in "${uid_list[@]}"; do
+        $iptables -t mangle -A BOX_LOCAL -m owner --uid-owner "$appid" -j RETURN
+      done
+      $iptables -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark "${mark_id}"
+      log Info "UDP proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy, DNS via TPROXY ($iptables)."
+    fi
 
-  iptables -w 100 -t mangle -I OUTPUT -j BOX_LOCAL
-  iptables -w 100 -t mangle -N DIVERT 2>/dev/null || iptables -w 100 -t mangle -F DIVERT
-  iptables -w 100 -t mangle -A DIVERT -j MARK --set-xmark "${id}"
-  iptables -w 100 -t mangle -A DIVERT -j ACCEPT
-  iptables -w 100 -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
-  iptables -w 100 -A OUTPUT -d 127.0.0.1 -p udp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT
+    $iptables -t mangle -I OUTPUT -j BOX_LOCAL
+    $iptables -t mangle -N DIVERT 2>/dev/null || $iptables -t mangle -F DIVERT
+    $iptables -t mangle -A DIVERT -j MARK --set-xmark "${mark_id}"
+    $iptables -t mangle -A DIVERT -j ACCEPT
+    $iptables -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
+    if [ "$iptables" = "ip6tables -w 100" ]; then
+      $iptables -A OUTPUT -d ::1 -p udp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT
+    else
+      $iptables -A OUTPUT -d 127.0.0.1 -p udp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT
+    fi
+  done
 }
 
 # Stop enhanced proxy mode
 stop_enhance() {
-  iptables -w 100 -t nat -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t nat -D OUTPUT -j BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t nat -F BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t nat -X BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t nat -F BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t nat -X BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t nat -F LOCAL_IP_V4 2>/dev/null
-  iptables -w 100 -t nat -X LOCAL_IP_V4 2>/dev/null
-  iptables -w 100 -D OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport "${redir_port}" -j REJECT 2>/dev/null
+  iptables="iptables -w 100"
+  $iptables -t nat -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
+  $iptables -t nat -D OUTPUT -j BOX_LOCAL 2>/dev/null
+  $iptables -t nat -F BOX_EXTERNAL 2>/dev/null
+  $iptables -t nat -X BOX_EXTERNAL 2>/dev/null
+  $iptables -t nat -F BOX_LOCAL 2>/dev/null
+  $iptables -t nat -X BOX_LOCAL 2>/dev/null
+  $iptables -t nat -F LOCAL_IP_V4 2>/dev/null
+  $iptables -t nat -X LOCAL_IP_V4 2>/dev/null
+  $iptables -D OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport "${redir_port}" -j REJECT 2>/dev/null
 
-  ip rule del fwmark "${id}" table "${id}" 2>/dev/null
-  ip route flush table "${id}" 2>/dev/null
-  iptables -w 100 -t mangle -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t mangle -D PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null
-  iptables -w 100 -t mangle -D OUTPUT -j BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t mangle -F BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t mangle -X BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t mangle -F BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t mangle -X BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t mangle -F DIVERT 2>/dev/null
-  iptables -w 100 -t mangle -X DIVERT 2>/dev/null
-  iptables -w 100 -D OUTPUT -d 127.0.0.1 -p udp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT 2>/dev/null
+  for iptables in "iptables -w 100" "ip6tables -w 100"; do
+    ip_cmd="ip"
+    [ "$iptables" = "ip6tables -w 100" ] && ip_cmd="ip -6"
+    $ip_cmd rule del fwmark "${mark_id}" table "${table_id}" 2>/dev/null
+    $ip_cmd route flush table "${table_id}" 2>/dev/null
+    $iptables -t mangle -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
+    $iptables -t mangle -D PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null
+    $iptables -t mangle -D OUTPUT -j BOX_LOCAL 2>/dev/null
+    $iptables -t mangle -F BOX_EXTERNAL 2>/dev/null
+    $iptables -t mangle -X BOX_EXTERNAL 2>/dev/null
+    $iptables -t mangle -F BOX_LOCAL 2>/dev/null
+    $iptables -t mangle -X BOX_LOCAL 2>/dev/null
+    $iptables -t mangle -F DIVERT 2>/dev/null
+    $iptables -t mangle -X DIVERT 2>/dev/null
+    if [ "$iptables" = "ip6tables -w 100" ]; then
+      $iptables -D OUTPUT -d ::1 -p udp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT 2>/dev/null
+    else
+      $iptables -D OUTPUT -d 127.0.0.1 -p udp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT 2>/dev/null
+    fi
+    $iptables -t mangle -F LOCAL_IP_V4 2>/dev/null
+    $iptables -t mangle -X LOCAL_IP_V4 2>/dev/null
+    $iptables -t mangle -F LOCAL_IP_V6 2>/dev/null
+    $iptables -t mangle -X LOCAL_IP_V6 2>/dev/null
+  done
 }
 
 # TPROXY mode setup
 start_tproxy() {
-  ip rule add fwmark "${id}" table "${id}" pref "${id}"
-  ip route add local default dev lo table "${id}"
+  for iptables in "iptables -w 100" "ip6tables -w 100"; do
+    ip_cmd="ip"
+    [ "$iptables" = "ip6tables -w 100" ] && ip_cmd="ip -6"
+    $ip_cmd rule add fwmark "${mark_id}" table "${table_id}" pref "${table_id}"
+    $ip_cmd route add local default dev lo table "${table_id}"
 
-  iptables -w 100 -t mangle -N BOX_EXTERNAL 2>/dev/null || iptables -w 100 -t mangle -F BOX_EXTERNAL
-  iptables -w 100 -t mangle -N BOX_LOCAL 2>/dev/null || iptables -w 100 -t mangle -F BOX_LOCAL
+    $iptables -t mangle -N BOX_EXTERNAL 2>/dev/null || $iptables -t mangle -F BOX_EXTERNAL
+    $iptables -t mangle -N BOX_LOCAL 2>/dev/null || $iptables -t mangle -F BOX_LOCAL
 
-  setup_intranet_bypass BOX_EXTERNAL mangle
-  setup_intranet_bypass BOX_LOCAL mangle
+    setup_intranet_bypass BOX_EXTERNAL mangle "$iptables"
+    setup_intranet_bypass BOX_LOCAL mangle "$iptables"
 
-  iptables -w 100 -t mangle -A BOX_EXTERNAL -p tcp -i lo -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${id}"
-  iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${id}"
+    $iptables -t mangle -A BOX_EXTERNAL -p tcp -i lo -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+    $iptables -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
 
-  if [ -n "${ap_list}" ]; then
-    for ap in "${ap_list[@]}"; do
-      iptables -w 100 -t mangle -A BOX_EXTERNAL -p tcp -i "$ap" -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${id}"
-      iptables -w 100 -t mangle -A BOX_EXTERNAL -p udp -i "$ap" -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${id}"
-    done
-    log Info "${ap_list[*]} transparent proxy."
-  fi
+    if [ -n "${ap_list}" ]; then
+      for ap in "${ap_list[@]}"; do
+        $iptables -t mangle -A BOX_EXTERNAL -p tcp -i "$ap" -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+        $iptables -t mangle -A BOX_EXTERNAL -p udp -i "$ap" -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+      done
+      log Info "${ap_list[*]} transparent proxy ($iptables)."
+    fi
 
-  iptables -w 100 -t mangle -I PREROUTING -j BOX_EXTERNAL
-  iptables -w 100 -t mangle -A BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
+    $iptables -t mangle -I PREROUTING -j BOX_EXTERNAL
+    $iptables -t mangle -A BOX_LOCAL -m owner --gid-owner 23333 -j RETURN
 
-  if [ ${#uid_list[@]} -eq 0 ]; then
-    iptables -w 100 -t mangle -A BOX_LOCAL -p tcp -j MARK --set-mark "${id}"
-    iptables -w 100 -t mangle -A BOX_LOCAL -p udp -j MARK --set-mark "${id}"
-    log Info "Transparent proxy for all apps."
-  else
-    for appid in "${uid_list[@]}"; do
-      iptables -w 100 -t mangle -A BOX_LOCAL -m owner --uid-owner "$appid" -j RETURN
-    done
-    iptables -w 100 -t mangle -A BOX_LOCAL -p tcp -j MARK --set-mark "${id}"
-    iptables -w 100 -t mangle -A BOX_LOCAL -p udp -j MARK --set-mark "${id}"
-    log Info "Proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy."
-  fi
+    if [ ${#uid_list[@]} -eq 0 ]; then
+      $iptables -t mangle -A BOX_LOCAL -p tcp -j MARK --set-mark "${mark_id}"
+      $iptables -t mangle -A BOX_LOCAL -p udp -j MARK --set-mark "${mark_id}"
+      log Info "Transparent proxy for all apps ($iptables)."
+    else
+      for appid in "${uid_list[@]}"; do
+        $iptables -t mangle -A BOX_LOCAL -m owner --uid-owner "$appid" -j RETURN
+      done
+      $iptables -t mangle -A BOX_LOCAL -p tcp -j MARK --set-mark "${mark_id}"
+      $iptables -t mangle -A BOX_LOCAL -p udp -j MARK --set-mark "${mark_id}"
+      log Info "Proxy mode: ${mode}, ${user_packages_list[*]} no transparent proxy ($iptables)."
+    fi
 
-  iptables -w 100 -t mangle -I OUTPUT -j BOX_LOCAL
-  iptables -w 100 -t mangle -N DIVERT 2>/dev/null || iptables -w 100 -t mangle -F DIVERT
-  iptables -w 100 -t mangle -A DIVERT -j MARK --set-mark "${id}"
-  iptables -w 100 -t mangle -A DIVERT -j ACCEPT
-  iptables -w 100 -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
-  iptables -w 100 -A OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT
+    $iptables -t mangle -I OUTPUT -j BOX_LOCAL
+    $iptables -t mangle -N DIVERT 2>/dev/null || $iptables -t mangle -F DIVERT
+    $iptables -t mangle -A DIVERT -j MARK --set-mark "${mark_id}"
+    $iptables -t mangle -A DIVERT -j ACCEPT
+    $iptables -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
+    if [ "$iptables" = "ip6tables -w 100" ]; then
+      $iptables -A OUTPUT -d ::1 -p tcp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT
+    else
+      $iptables -A OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT
+    fi
+  done
 }
 
 # Stop TPROXY mode
 stop_tproxy() {
-  ip rule del fwmark "${id}" table "${id}" 2>/dev/null
-  ip route flush table "${id}" 2>/dev/null
-  iptables -w 100 -t mangle -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t mangle -D PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null
-  iptables -w 100 -t mangle -D OUTPUT -j BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t mangle -F BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t mangle -X BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t mangle -F BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t mangle -X BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t mangle -F DIVERT 2>/dev/null
-  iptables -w 100 -t mangle -X DIVERT 2>/dev/null
-  iptables -w 100 -D OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT 2>/dev/null
+  for iptables in "iptables -w 100" "ip6tables -w 100"; do
+    ip_cmd="ip"
+    [ "$iptables" = "ip6tables -w 100" ] && ip_cmd="ip -6"
+    $ip_cmd rule del fwmark "${mark_id}" table "${table_id}" 2>/dev/null
+    $ip_cmd route flush table "${table_id}" 2>/dev/null
+    $iptables -t mangle -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
+    $iptables -t mangle -D PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null
+    $iptables -t mangle -D OUTPUT -j BOX_LOCAL 2>/dev/null
+    $iptables -t mangle -F BOX_EXTERNAL 2>/dev/null
+    $iptables -t mangle -X BOX_EXTERNAL 2>/dev/null
+    $iptables -t mangle -F BOX_LOCAL 2>/dev/null
+    $iptables -t mangle -X BOX_LOCAL 2>/dev/null
+    $iptables -t mangle -F DIVERT 2>/dev/null
+    $iptables -t mangle -X DIVERT 2>/dev/null
+    if [ "$iptables" = "ip6tables -w 100" ]; then
+      $iptables -D OUTPUT -d ::1 -p tcp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT 2>/dev/null
+    else
+      $iptables -D OUTPUT -d 127.0.0.1 -p tcp -m owner --gid-owner 23333 --dport "${tproxy_port}" -j REJECT 2>/dev/null
+    fi
+    $iptables -t mangle -F LOCAL_IP_V4 2>/dev/null
+    $iptables -t mangle -X LOCAL_IP_V4 2>/dev/null
+    $iptables -t mangle -F LOCAL_IP_V6 2>/dev/null
+    $iptables -t mangle -X LOCAL_IP_V6 2>/dev/null
+  done
 }
 
 # Start TUN mode
@@ -284,8 +354,15 @@ start() {
   chmod 755 "${binfile}"
   chown root:net_admin "${binfile}"
   ulimit -SHn 1048576
+  [ "${ipv6}" = "enable" ] && enable_ipv6 && log Info "IPv6 enabled." || disable_ipv6
   case "${mode}" in
-    tproxy) start_tproxy ;;
+    tproxy)
+      if ! zcat /proc/config.gz | grep -q TPROXY; then
+        log Error "Kernel does not support TPROXY."
+        exit 1
+      fi
+      start_tproxy
+      ;;
     tun) start_tun ;;
     enhance) start_enhance ;;
     *) log Error "Invalid mode: ${mode}"; exit 1 ;;
@@ -307,6 +384,7 @@ stop() {
     *) log Warn "No valid mode specified for cleanup." ;;
   esac
   rm -f "${scripts_dir}/uids.list"
+  enable_ipv6
 }
 
 # Get local IP address
@@ -334,3 +412,4 @@ run() {
 # Created on May 9, 2024
 # Updated on August 4, 2025 to add enhance mode and fix DNS
 # Optimized on August 6, 2025 for efficiency and robustness
+# Updated on August 6, 2025 to add IPv6 support
