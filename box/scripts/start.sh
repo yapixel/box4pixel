@@ -3,7 +3,7 @@ clear; cd ${0%/*}
 
   MODDIR="/data/adb/modules/box4-pixel"
   SCRIPTS_DIR="/data/adb/box/scripts"
-  busybox="/data/adb/magisk/busybox"
+  busybox="/data/adb/ksu/bin/busybox"
   normal=$(printf '\033[0m'); green=$(printf '\033[0;32m'); red=$(printf '\033[91m')
   
   source ./box.scripts
