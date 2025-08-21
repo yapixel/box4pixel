@@ -555,23 +555,6 @@ stop() {
   rm -f ${scripts_dir}/uids.list
 }
 
-net_ip() {
-  local_ip=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") {print $(i+1); break}}')
-  [ -n "${local_ip}" ] && echo "${local_ip}" || log Warn "Failed to detect local IPv4 address"
-}
-
-net_id() {
-  wlan_interfaces=($(${iw} dev | awk '$1=="Interface"{print $2}'))
-  for interface in "${wlan_interfaces[@]}"; do
-    ssid=$(${iw} dev "${interface}" link | awk '/SSID/{print $2}')
-    if [ -n "${ssid}" ]; then
-      echo "${ssid}"
-      return
-    fi
-  done
-  echo "mobile"
-}
-
 run() { 
   stop
   find_packages_uid
@@ -597,7 +580,6 @@ case "$1" in
     exit 1
     ;;
 esac
-
 # Created on May 9 2024
 # Updated on August 4 2025 to add enhance mode
 # Updated on August 20 2025 to fix DNS in enhance mode
