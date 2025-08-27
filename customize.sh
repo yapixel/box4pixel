@@ -52,7 +52,7 @@ fi
 mkdir -p /data/adb/box/bin/
 mkdir -p /data/adb/box/run/
 
-mv -f $MODPATH/box4_service.sh $service_dir/
+mv -f $MODPATH/box4pixel_service.sh $service_dir/
 
 rm -f customize.sh
 
@@ -61,7 +61,7 @@ set_perm_recursive /data/adb/box/ 0 0 0755 0644
 set_perm_recursive /data/adb/box/scripts/ 0 0 0755 0700
 set_perm_recursive /data/adb/box/bin/ 0 0 0755 0700
 
-set_perm $service_dir/box4_service.sh 0 0 0700
+set_perm $service_dir/box4pixel_service.sh 0 0 0700
 
 # fix "set_perm_recursive /data/adb/box/scripts" not working on some phones.
 chmod ugo+x /data/adb/box/scripts/*

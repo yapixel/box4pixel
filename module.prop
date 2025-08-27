@@ -1,7 +1,7 @@
-id=box4
-name=box4magisk (GitHub@debiansid)
-version=v5.1
-versionCode=2024091613
-author=CHIZI-0618
+id=box-pixel
+name=box4pixel (GitHub@debiansid)
+version=v0.3
+versionCode=003
+author=zen
 description=Use sing-box on Google Pixel devices.
-updateJson=https://raw.githubusercontent.com/CHIZI-0618/box4magisk/main/box4.json
+updateJson=https://raw.githubusercontent.com/debiansid/box4magisk/main/box4.json
