@@ -1,38 +1,75 @@
-/#!/system/bin/sh
-#####################
-# Box Customization
-#####################
+#!/sbin/sh
+
 SKIPUNZIP=1
 ASH_STANDALONE=1
-unzip_path="/data/adb"
 
-# Define the paths of sourcefolder and the destination folder
-source_folder="/data/adb/box"
-destination_folder="/data/adb/box$(date +%Y%m%d_%H%M%S)"
-
-# Check if the source folder exists
-if [ -d "$source_folder" ]; then
-    # If the source folder exists, execute the move operation
-    mv "$source_folder" "$destination_folder"
-    ui_print "- 正在备份已有文件"
-    # Delete old folders and update them
-    rm -rf "$source_folder"
-else
-    # If the source folder does not exist, output initial installation information 
-    ui_print "- 正在初始安装"
+if [ "$BOOTMODE" ! = true ] ; then
+  abort "Error: Please install in Magisk Manager, KernelSU Manager or APatch"
 fi
 
+if [ "$KSU" = true ] && [ "$KSU_VER_CODE" -lt 10670 ] ; then
+  abort "Error: Please update your KernelSU"
+fi
 
-ui_print "- 正在释放新文件"
-unzip -o "$ZIPFILE" 'box/*' -d $unzip_path >&2
-unzip -j -o "$ZIPFILE" 'box4pixel_service.sh' -d /data/adb/service.d >&2
-unzip -j -o "$ZIPFILE" 'uninstall.sh' -d $MODPATH >&2
-unzip -j -o "$ZIPFILE" "module.prop" -d $MODPATH >&2
+if [ "$KSU" = true ] && [ "$KSU_VER_CODE" -lt 10683 ] ; then
+  service_dir="/data/adb/ksu/service.d"
+else 
+  service_dir="/data/adb/service.d"
+fi
+
+if [ ! -d "$service_dir" ] ; then
+    mkdir -p $service_dir
+fi
+
+unzip -qo "${ZIPFILE}" -x 'META-INF/*' -d $MODPATH
+
+if [ -d /data/adb/box ] ; then
+  cp /data/adb/box/scripts/box.config /data/adb/box/scripts/box.config.bak
+  ui_print "- User configuration box.config has been backed up to box.config.bak"
+
+  cat /data/adb/box/scripts/box.config >> $MODPATH/box/scripts/box.config
+  cp -f $MODPATH/box/scripts/* /data/adb/box/scripts/
+  ui_print "- User configuration box.config has been"
+  ui_print "- attached to the module box.config,"
+  ui_print "- please re-edit box.config"
+  ui_print "- after the update is complete."
+
+  awk '!x[$0]++' $MODPATH/box/scripts/box.config > /data/adb/box/scripts/box.config
+
+  rm -rf $MODPATH/box
+else
+  mv $MODPATH/box /data/adb/
+fi
+
+if [ "$KSU" = true ] ; then
+  sed -i 's/name=box4magisk/name=box4KernelSU/g' $MODPATH/module.prop
+fi
+
+if [ "$APATCH" = true ] ; then
+  sed -i 's/name=box4magisk/name=box4APatch/g' $MODPATH/module.prop
+fi
+
+mkdir -p /data/adb/box/bin/
 mkdir -p /data/adb/box/run/
-ui_print "- 正在设置权限"
-set_perm /data/adb/service.d/box4pixel_service.sh 0 0 0755
-set_perm $MODPATH/uninstall.sh 0 0 0755
+
+mv -f $MODPATH/box4_service.sh $service_dir/
+
+rm -f customize.sh
+
 set_perm_recursive $MODPATH 0 0 0755 0644
-set_perm_recursive $unzip_path/box 0 0 0755 0755
-ui_print "- 完成权限设置"
-ui_print "- enjoy"
+set_perm_recursive /data/adb/box/ 0 0 0755 0644
+set_perm_recursive /data/adb/box/scripts/ 0 0 0755 0700
+set_perm_recursive /data/adb/box/bin/ 0 0 0755 0700
+
+set_perm $service_dir/box4_service.sh 0 0 0700
+
+# fix "set_perm_recursive /data/adb/box/scripts" not working on some phones.
+chmod ugo+x /data/adb/box/scripts/*
+
+for pid in $(pidof inotifyd) ; do
+  if grep -q box.inotify /proc/${pid}/cmdline ; then
+    kill ${pid}
+  fi
+done
+
+inotifyd "/data/adb/box/scripts/box.inotify" "$MODPATH" > /dev/null 2>&1 &
