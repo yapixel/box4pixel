@@ -1,0 +1,60 @@
+#!/system/bin/sh
+
+scripts=$(realpath $0)
+scripts_dir=$(dirname ${scripts})
+
+source ${scripts_dir}/box.config
+
+events=$1
+
+log() {
+  export TZ=Asia/Shanghai
+  now=$(date +"[%Y-%m-%d %H:%M:%S %Z]")
+  case $1 in
+    Info)
+      [ -t 1 ] && echo -e "\033[1;32m${now} [Info]: $2\033[0m" || echo "${now} [Info]: $2" >> ${run_path}/run.log 2>> ${run_path}/run_error.log
+      ;;
+    Warn)
+      [ -t 1 ] && echo -e "\033[1;33m${now} [Warn]: $2\033[0m" || echo "${now} [Warn]: $2" >> ${run_path}/run.log 2>> ${run_path}/run_error.log
+      ;;
+    Error)
+      [ -t 1 ] && echo -e "\033[1;31m${now} [Error]: $2\033[0m" || echo "${now} [Error]: $2" >> ${run_path}/run.log 2>> ${run_path}/run_error.log
+      ;;
+    *)
+      [ -t 1 ] && echo -e "\033[1;30m${now} [$1]: $2\033[0m" || echo "${now} [$1]: $2" >> ${run_path}/run.log 2>> ${run_path}/run_error.log
+      ;;
+  esac
+}
+
+rules_add() {
+  ${iptables:-iptables -w 100} -t mangle -F LOCAL_IP_V4 2>/dev/null
+  ip -4 a | awk '/inet/ {print $2}' | grep -vE "^127.0.0.1" | while read -r local_ipv4 ; do
+    ${iptables:-iptables -w 100} -t mangle -A LOCAL_IP_V4 -d ${local_ipv4} -j ACCEPT
+    rv1=$?
+    ${iptables:-iptables -w 100} -t nat -A LOCAL_IP_V4 -d ${local_ipv4} -j ACCEPT
+    rv2=$?
+    if [ ${rv1} -eq 0 ] || [ ${rv2} -eq 0 ]; then
+      log Info "local IPv4 ${local_ipv4}, anti-loopback rule added"
+    else
+      log Error "failed to add anti-loopback rule for IPv4 ${local_ipv4}"
+    fi
+  done
+
+  if [ "${ipv6}" = "enable" ]; then
+    ip6tables -w 100 -t mangle -F LOCAL_IP_V6 2>/dev/null
+    ip -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1" | while read -r local_ipv6 ; do
+      ip6tables -w 100 -t mangle -A LOCAL_IP_V6 -d ${local_ipv6} -j ACCEPT
+      if [ $? -eq 0 ]; then
+        log Info "local IPv6 ${local_ipv6}, anti-loopback rule added"
+      else
+        log Error "failed to add anti-loopback rule for IPv6 ${local_ipv6}"
+      fi
+    fi
+  fi
+}
+
+mkdir -p ${run_path}
+
+if [ "${events}" = "w" ]; then
+  rules_add
+fi
