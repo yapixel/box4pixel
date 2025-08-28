@@ -6,7 +6,7 @@ scripts=$(realpath $0)
 scripts_dir=$(dirname ${scripts})
 
 source ${scripts_dir}/box.config
-mark_id="16777216/16777216"
+
 table_id="2024"
 id="222"
 
@@ -255,179 +255,9 @@ stop_tproxy() {
   fi
 }
 
-start_mixed() {
-  create_ip_rules
-
-  # TCP redirect (nat table)
-  iptables -w 100 -t nat -N BOX_EXTERNAL
-  iptables -w 100 -t nat -F BOX_EXTERNAL
-  iptables -w 100 -t nat -N BOX_LOCAL
-  iptables -w 100 -t nat -F BOX_LOCAL
-
-  for subnet in ${intranet[@]} ; do
-    iptables -w 100 -t nat -A BOX_EXTERNAL -d ${subnet} -j RETURN
-    iptables -w 100 -t nat -A BOX_LOCAL -d ${subnet} -j RETURN
-  done
-
-  iptables -w 100 -t nat -N LOCAL_IP_V4
-  iptables -w 100 -t nat -F LOCAL_IP_V4
-  iptables -w 100 -t nat -A BOX_EXTERNAL -j LOCAL_IP_V4
-  iptables -w 100 -t nat -A BOX_LOCAL -j LOCAL_IP_V4
-
-  iptables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i lo -j REDIRECT --to-ports ${redir_port}
-  if [ "${ap_list}" != "" ] ; then
-    for ap in ${ap_list[@]} ; do
-      iptables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i ${ap} -j REDIRECT --to-ports ${redir_port}
-    done
-    log Info "${ap_list[*]} TCP transparent proxy."
-  fi
-
-  iptables -w 100 -t nat -I PREROUTING -j BOX_EXTERNAL
-
-  iptables -w 100 -t nat -A BOX_LOCAL -m owner --uid-owner ${box_user} --gid-owner ${box_group} -j RETURN
-  if [ "${ignore_out_list}" != "" ] ; then
-    for ignore in ${ignore_out_list[@]} ; do
-      iptables -w 100 -t nat -A BOX_LOCAL -o ${ignore} -j RETURN
-    done
-    log Info "${ignore_out_list[*]} ignore TCP transparent proxy."
-  fi
-
-  if [ "${proxy_mode}" = "blacklist" ] ; then
-    if [ "${uid_list}" = "" ] ; then
-      iptables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-      log Info "TCP transparent proxy for all apps."
-    else
-      for appid in ${uid_list[@]} ; do
-        iptables -w 100 -t nat -A BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
-      done
-      iptables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-      log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} no TCP transparent proxy."
-    fi
-    if [ "${gid_list}" != "" ] ; then
-      for gid in ${gid_list[@]} ; do
-        iptables -w 100 -t nat -A BOX_LOCAL -m owner --gid-owner ${gid} -j RETURN
-      done
-      log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} no TCP transparent proxy."
-    fi
-  elif [ "${proxy_mode}" = "whitelist" ] ; then
-    if [ "${uid_list}" != "" ] ; then
-      for appid in ${uid_list[@]} ; do
-        iptables -w 100 -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner ${appid} -j REDIRECT --to-ports ${redir_port}
-      done
-      log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} TCP transparent proxy."
-    fi
-    if [ "${gid_list}" != "" ] ; then
-      for gid in ${gid_list[@]} ; do
-        iptables -w 100 -t nat -A BOX_LOCAL -p tcp -m owner --gid-owner ${gid} -j REDIRECT --to-ports ${redir_port}
-      done
-      log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} TCP transparent proxy."
-    fi
-  elif [ "${proxy_mode}" = "core" ] ; then
-    log Info "proxy mode: ${proxy_mode}, no apps TCP transparent proxy."
-  fi
-
-  iptables -w 100 -t nat -I OUTPUT -j BOX_LOCAL
-
-  if [ "${ipv6}" = "enable" ] ; then
-    ip6tables -w 100 -t nat -N BOX_EXTERNAL
-    ip6tables -w 100 -t nat -F BOX_EXTERNAL
-    ip6tables -w 100 -t nat -N BOX_LOCAL
-    ip6tables -w 100 -t nat -F BOX_LOCAL
-
-    for subnet6 in ${intranet6[@]} ; do
-      ip6tables -w 100 -t nat -A BOX_EXTERNAL -d ${subnet6} -j RETURN
-      ip6tables -w 100 -t nat -A BOX_LOCAL -d ${subnet6} -j RETURN
-    done
-
-    ip6tables -w 100 -t nat -N LOCAL_IP_V6
-    ip6tables -w 100 -t nat -F LOCAL_IP_V6
-    ip6tables -w 100 -t nat -A BOX_EXTERNAL -j LOCAL_IP_V6
-    ip6tables -w 100 -t nat -A BOX_LOCAL -j LOCAL_IP_V6
-
-    ip6tables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i lo -j REDIRECT --to-ports ${redir_port}
-    if [ "${ap_list}" != "" ] ; then
-      for ap in ${ap_list[@]} ; do
-        ip6tables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i ${ap} -j REDIRECT --to-ports ${redir_port}
-      done
-      log Info "${ap_list[*]} IPv6 TCP transparent proxy."
-    fi
-
-    ip6tables -w 100 -t nat -I PREROUTING -j BOX_EXTERNAL
-
-    ip6tables -w 100 -t nat -A BOX_LOCAL -m owner --uid-owner ${box_user} --gid-owner ${box_group} -j RETURN
-    if [ "${ignore_out_list}" != "" ] ; then
-      for ignore in ${ignore_out_list[@]} ; do
-        ip6tables -w 100 -t nat -A BOX_LOCAL -o ${ignore} -j RETURN
-      done
-      log Info "${ignore_out_list[*]} ignore IPv6 TCP transparent proxy."
-    fi
-
-    if [ "${proxy_mode}" = "blacklist" ] ; then
-      if [ "${uid_list}" = "" ] ; then
-        ip6tables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-        log Info "IPv6 TCP transparent proxy for all apps."
-      else
-        for appid in ${uid_list[@]} ; do
-          ip6tables -w 100 -t nat -A BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
-        done
-        ip6tables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-        log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} no IPv6 TCP transparent proxy."
-      fi
-      if [ "${gid_list}" != "" ] ; then
-        for gid in ${gid_list[@]} ; do
-          ip6tables -w 100 -t nat -A BOX_LOCAL -m owner --gid-owner ${gid} -j RETURN
-        done
-        log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} no IPv6 TCP transparent proxy."
-      fi
-    elif [ "${proxy_mode}" = "whitelist" ] ; then
-      if [ "${uid_list}" != "" ] ; then
-        for appid in ${uid_list[@]} ; do
-          ip6tables -w 100 -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner ${appid} -j REDIRECT --to-ports ${redir_port}
-        done
-        log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} IPv6 TCP transparent proxy."
-      fi
-      if [ "${gid_list}" != "" ] ; then
-        for gid in ${gid_list[@]} ; do
-          ip6tables -w 100 -t nat -A BOX_LOCAL -p tcp -m owner --gid-owner ${gid} -j REDIRECT --to-ports ${redir_port}
-        done
-        log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} IPv6 TCP transparent proxy."
-      fi
-    elif [ "${proxy_mode}" = "core" ] ; then
-      log Info "proxy mode: ${proxy_mode}, no apps IPv6 TCP transparent proxy."
-    fi
-
-    ip6tables -w 100 -t nat -I OUTPUT -j BOX_LOCAL
-  fi
-}
-
-stop_mixed() {
-  delete_ip_rules
-
-  iptables -w 100 -t nat -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t nat -D OUTPUT -j BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t nat -F BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t nat -X BOX_EXTERNAL 2>/dev/null
-  iptables -w 100 -t nat -F BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t nat -X BOX_LOCAL 2>/dev/null
-  iptables -w 100 -t nat -F LOCAL_IP_V4 2>/dev/null
-  iptables -w 100 -t nat -X LOCAL_IP_V4 2>/dev/null
-
-  if [ "${ipv6}" = "enable" ] ; then
-    ip6tables -w 100 -t nat -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
-    ip6tables -w 100 -t nat -D OUTPUT -j BOX_LOCAL 2>/dev/null
-    ip6tables -w 100 -t nat -F BOX_EXTERNAL 2>/dev/null
-    ip6tables -w 100 -t nat -X BOX_EXTERNAL 2>/dev/null
-    ip6tables -w 100 -t nat -F BOX_LOCAL 2>/dev/null
-    ip6tables -w 100 -t nat -X BOX_LOCAL 2>/dev/null
-    ip6tables -w 100 -t nat -F LOCAL_IP_V6 2>/dev/null
-    ip6tables -w 100 -t nat -X LOCAL_IP_V6 2>/dev/null
-  fi
-}
-
 start_enhance() {
   create_ip_rules
 
-  # TCP redirect (nat table)
   iptables -w 100 -t nat -N BOX_EXTERNAL
   iptables -w 100 -t nat -F BOX_EXTERNAL
   iptables -w 100 -t nat -N BOX_LOCAL
@@ -497,7 +327,6 @@ start_enhance() {
 
   iptables -w 100 -t nat -I OUTPUT -j BOX_LOCAL
 
-  # UDP TPROXY (mangle table)
   iptables -w 100 -t mangle -N BOX_EXTERNAL
   iptables -w 100 -t mangle -F BOX_EXTERNAL
   iptables -w 100 -t mangle -N BOX_LOCAL
@@ -562,82 +391,7 @@ start_enhance() {
 
   iptables -w 100 -t mangle -I OUTPUT -j BOX_LOCAL
 
-  iptables -w 100 -t mangle -N DIVERT
-  iptables -w 100 -t mangle -F DIVERT
-  iptables -w 100 -t mangle -A DIVERT -j MARK --set-mark ${id}
-  iptables -w 100 -t mangle -A DIVERT -j ACCEPT
-  iptables -w 100 -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
-
   if [ "${ipv6}" = "enable" ] ; then
-    ip6tables -w 100 -t nat -N BOX_EXTERNAL
-    ip6tables -w 100 -t nat -F BOX_EXTERNAL
-    ip6tables -w 100 -t nat -N BOX_LOCAL
-    ip6tables -w 100 -t nat -F BOX_LOCAL
-
-    for subnet6 in ${intranet6[@]} ; do
-      ip6tables -w 100 -t nat -A BOX_EXTERNAL -d ${subnet6} -j RETURN
-      ip6tables -w 100 -t nat -A BOX_LOCAL -d ${subnet6} -j RETURN
-    done
-
-    ip6tables -w 100 -t nat -N LOCAL_IP_V6
-    ip6tables -w 100 -t nat -F LOCAL_IP_V6
-    ip6tables -w 100 -t nat -A BOX_EXTERNAL -j LOCAL_IP_V6
-    ip6tables -w 100 -t nat -A BOX_LOCAL -j LOCAL_IP_V6
-
-    ip6tables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i lo -j REDIRECT --to-ports ${redir_port}
-    if [ "${ap_list}" != "" ] ; then
-      for ap in ${ap_list[@]} ; do
-        ip6tables -w 100 -t nat -A BOX_EXTERNAL -p tcp -i ${ap} -j REDIRECT --to-ports ${redir_port}
-      done
-      log Info "${ap_list[*]} IPv6 TCP transparent proxy."
-    fi
-
-    ip6tables -w 100 -t nat -I PREROUTING -j BOX_EXTERNAL
-
-    ip6tables -w 100 -t nat -A BOX_LOCAL -m owner --uid-owner ${box_user} --gid-owner ${box_group} -j RETURN
-    if [ "${ignore_out_list}" != "" ] ; then
-      for ignore in ${ignore_out_list[@]} ; do
-        ip6tables -w 100 -t nat -A BOX_LOCAL -o ${ignore} -j RETURN
-      done
-      log Info "${ignore_out_list[*]} ignore IPv6 TCP transparent proxy."
-    fi
-
-    if [ "${proxy_mode}" = "blacklist" ] ; then
-      if [ "${uid_list}" = "" ] ; then
-        ip6tables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-        log Info "IPv6 TCP transparent proxy for all apps."
-      else
-        for appid in ${uid_list[@]} ; do
-          ip6tables -w 100 -t nat -A BOX_LOCAL -m owner --uid-owner ${appid} -j RETURN
-        done
-        ip6tables -w 100 -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-        log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} no IPv6 TCP transparent proxy."
-      fi
-      if [ "${gid_list}" != "" ] ; then
-        for gid in ${gid_list[@]} ; do
-          ip6tables -w 100 -t nat -A BOX_LOCAL -m owner --gid-owner ${gid} -j RETURN
-        done
-        log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} no IPv6 TCP transparent proxy."
-      fi
-    elif [ "${proxy_mode}" = "whitelist" ] ; then
-      if [ "${uid_list}" != "" ] ; then
-        for appid in ${uid_list[@]} ; do
-          ip6tables -w 100 -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner ${appid} -j REDIRECT --to-ports ${redir_port}
-        done
-        log Info "proxy mode: ${proxy_mode}, ${user_packages_list[*]} IPv6 TCP transparent proxy."
-      fi
-      if [ "${gid_list}" != "" ] ; then
-        for gid in ${gid_list[@]} ; do
-          ip6tables -w 100 -t nat -A BOX_LOCAL -p tcp -m owner --gid-owner ${gid} -j REDIRECT --to-ports ${redir_port}
-        done
-        log Info "proxy mode: ${proxy_mode}, GID ${gid_list[*]} IPv6 TCP transparent proxy."
-      fi
-    elif [ "${proxy_mode}" = "core" ] ; then
-      log Info "proxy mode: ${proxy_mode}, no apps IPv6 TCP transparent proxy."
-    fi
-
-    ip6tables -w 100 -t nat -I OUTPUT -j BOX_LOCAL
-
     ip6tables -w 100 -t mangle -N BOX_EXTERNAL
     ip6tables -w 100 -t mangle -F BOX_EXTERNAL
     ip6tables -w 100 -t mangle -N BOX_LOCAL
@@ -711,6 +465,8 @@ start_enhance() {
 }
 
 stop_enhance() {
+  delete_ip_rules
+
   iptables -w 100 -t nat -D PREROUTING -j BOX_EXTERNAL 2>/dev/null
   iptables -w 100 -t nat -D OUTPUT -j BOX_LOCAL 2>/dev/null
   iptables -w 100 -t nat -F BOX_EXTERNAL 2>/dev/null
@@ -742,8 +498,6 @@ stop_enhance() {
     ip6tables -w 100 -t mangle -F DIVERT 2>/dev/null
     ip6tables -w 100 -t mangle -X DIVERT 2>/dev/null
   fi
-
-  delete_ip_rules
 }
 
 enable_ipv6() {
@@ -779,21 +533,6 @@ case "$1" in
         disable_ipv6
         log Warn "disable IPv6."
       fi
-    elif [ "${proxy_method}" = "MIXED" ] ; then
-      log Info "use MIXED:TCP REDIRECT+UDP TUN."
-      log Info "creating ip(6)tables transparent proxy rules."
-      iptables="iptables -w 100"
-      start_mixed && log Info "create iptables transparent proxy rules done." || (log Error "create iptables transparent proxy rules failed." && stop_mixed >> /dev/null 2>&1)
-      if [ "${ipv6}" = "enable" ] ; then
-        log Info "use IPv6."
-        enable_ipv6
-        iptables="ip6tables -w 100"
-        intranet6[${#intranet6[@]}]=$(ip -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1")
-        start_mixed && log Info "create ip6tables transparent proxy rules done." || (log Error "create ip6tables transparent proxy rules failed." && stop_mixed >> /dev/null 2>&1)
-      else
-        disable_ipv6
-        log Warn "disable IPv6."
-      fi
     elif [ "${proxy_method}" = "ENHANCE" ] ; then
       log Info "use ENHANCE:TCP+UDP."
       log Info "creating ip(6)tables transparent proxy rules."
@@ -810,7 +549,7 @@ case "$1" in
         log Warn "disable IPv6."
       fi
     else
-      log Error "unsupported proxy_method: ${proxy_method}. Use TPROXY, MIXED, or ENHANCE."
+      log Error "unsupported proxy_method: ${proxy_method}. Use TPROXY or ENHANCE."
       exit 1
     fi
     ;;
@@ -819,8 +558,6 @@ case "$1" in
     probe_user_group
     iptables="iptables -w 100" && stop_tproxy >> /dev/null 2>&1
     iptables="ip6tables -w 100" && stop_tproxy >> /dev/null 2>&1
-    iptables="iptables -w 100" && stop_mixed >> /dev/null 2>&1
-    iptables="ip6tables -w 100" && stop_mixed >> /dev/null 2>&1
     iptables="iptables -w 100" && stop_enhance >> /dev/null 2>&1
     iptables="ip6tables -w 100" && stop_enhance >> /dev/null 2>&1
     log Warn "clean up ip(6)tables transparent proxy rules done."
@@ -831,8 +568,6 @@ case "$1" in
     log Warn "cleaning up ip(6)tables transparent proxy rules."
     iptables="iptables -w 100" && stop_tproxy >> /dev/null 2>&1
     iptables="ip6tables -w 100" && stop_tproxy >> /dev/null 2>&1
-    iptables="iptables -w 100" && stop_mixed >> /dev/null 2>&1
-    iptables="ip6tables -w 100" && stop_mixed >> /dev/null 2>&1
     iptables="iptables -w 100" && stop_enhance >> /dev/null 2>&1
     iptables="ip6tables -w 100" && stop_enhance >> /dev/null 2>&1
     log Warn "clean up ip(6)tables transparent proxy rules done."
@@ -858,21 +593,6 @@ case "$1" in
         disable_ipv6
         log Warn "disable IPv6."
       fi
-    elif [ "${proxy_method}" = "MIXED" ] ; then
-      log Info "use MIXED:TCP REDIRECT+UDP TUN."
-      log Info "creating ip(6)tables transparent proxy rules."
-      iptables="iptables -w 100"
-      start_mixed && log Info "create iptables transparent proxy rules done." || (log Error "create iptables transparent proxy rules failed." && stop_mixed >> /dev/null 2>&1)
-      if [ "${ipv6}" = "enable" ] ; then
-        log Info "use IPv6."
-        enable_ipv6
-        iptables="ip6tables -w 100"
-        intranet6[${#intranet6[@]}]=$(ip -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1")
-        start_mixed && log Info "create ip6tables transparent proxy rules done." || (log Error "create ip6tables transparent proxy rules failed." && stop_mixed >> /dev/null 2>&1)
-      else
-        disable_ipv6
-        log Warn "disable IPv6."
-      fi
     elif [ "${proxy_method}" = "ENHANCE" ] ; then
       log Info "use ENHANCE:TCP+UDP."
       log Info "creating ip(6)tables transparent proxy rules."
@@ -889,7 +609,7 @@ case "$1" in
         log Warn "disable IPv6."
       fi
     else
-      log Error "unsupported proxy_method: ${proxy_method}. Use TPROXY, MIXED, or ENHANCE."
+      log Error "unsupported proxy_method: ${proxy_method}. Use TPROXY or ENHANCE."
       exit 1
     fi
     ;;
