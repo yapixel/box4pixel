@@ -1,6 +1,6 @@
 #!/sbin/sh
 
-module_dir="/data/adb/modules/box4"
+module_dir="/data/adb/modules/box4-pixel"
 
 [ -n "$(magisk -v | grep lite)" ] && module_dir=/data/adb/lite_modules/box4
 
