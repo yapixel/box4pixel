@@ -143,6 +143,7 @@ display_bin_status() {
     log Info "${bin_name} memory usage: $(cat /proc/${bin_pid}/status | grep -w VmRSS | awk '{print $2$3}')"
     log Info "${bin_name} cpu usage: $( (/system/bin/ps -eo %CPU,NAME | grep "${bin_name}" | awk '{print $1"%"}') 2>/dev/null || dumpsys cpuinfo | grep "${bin_name}" | awk '{print $1}')"
     log Info "${bin_name} running time: $(busybox ps -o comm,etime | grep "${bin_name}" | awk '{print $2}')"
+    log Info "${bin_name} version: $(${bin_path} version | grep -oP 'sing-box version \K.*' || echo "unknown")"
     echo -n "${bin_pid}" > "${pid_file}"
     return 0
   else
